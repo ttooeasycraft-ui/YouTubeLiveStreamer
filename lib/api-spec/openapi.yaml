@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: stream
+    description: YouTube Live streaming operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /stream/status:
+    get:
+      operationId: getStreamStatus
+      tags: [stream]
+      summary: Get current stream status
+      responses:
+        "200":
+          description: Stream status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+  /stream/start:
+    post:
+      operationId: startStream
+      tags: [stream]
+      summary: Start streaming a video to YouTube Live in a loop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamInput"
+      responses:
+        "200":
+          description: Stream started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Stream already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/stop:
+    post:
+      operationId: stopStream
+      tags: [stream]
+      summary: Stop the current live stream
+      responses:
+        "200":
+          description: Stream stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "404":
+          description: No stream running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/videos:
+    get:
+      operationId: listVideos
+      tags: [stream]
+      summary: List uploaded videos
+      responses:
+        "200":
+          description: List of uploaded videos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VideoFile"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +109,57 @@ components:
           type: string
       required:
         - status
-
+    StreamStatus:
+      type: object
+      properties:
+        isStreaming:
+          type: boolean
+        videoFile:
+          type: ["string", "null"]
+        streamKey:
+          type: ["string", "null"]
+        startedAt:
+          type: ["string", "null"]
+        error:
+          type: ["string", "null"]
+      required:
+        - isStreaming
+        - videoFile
+        - streamKey
+        - startedAt
+        - error
+    StreamInput:
+      type: object
+      properties:
+        streamKey:
+          type: string
+          minLength: 1
+        videoFile:
+          type: string
+          minLength: 1
+      required:
+        - streamKey
+        - videoFile
+    VideoFile:
+      type: object
+      properties:
+        filename:
+          type: string
+        originalName:
+          type: string
+        size:
+          type: integer
+        uploadedAt:
+          type: string
+      required:
+        - filename
+        - originalName
+        - size
+        - uploadedAt
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/live-streamer/"
+title = "YouTube Live Streamer"
+version = "1.0.0"
+id = "artifacts/live-streamer"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/live-streamer/" ]
+localPort = 21786
+
+[services.development]
+run = "pnpm --filter @workspace/live-streamer run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/live-streamer", "run", "build" ]
+publicDir = "artifacts/live-streamer/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21786"
+BASE_PATH = "/live-streamer/"

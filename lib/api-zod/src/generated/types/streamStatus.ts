@@ -5,9 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
-}
 
 export interface StreamStatus {
   isStreaming: boolean;
@@ -20,22 +17,3 @@ export interface StreamStatus {
   /** @nullable */
   error: string | null;
 }
-
-export interface StreamInput {
-  /** @minLength 1 */
-  streamKey: string;
-  /** @minLength 1 */
-  videoFile: string;
-}
-
-export interface VideoFile {
-  filename: string;
-  originalName: string;
-  size: number;
-  uploadedAt: string;
-}
-
-export interface ErrorResponse {
-  error: string;
-}
-
