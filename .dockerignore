@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/.tsbuildinfo
+**/dist
+**/.git
+.git
+attached_assets
+artifacts/mockup-sandbox
+.local
+.agents
+*.log
+uploads
