@@ -44,6 +44,7 @@ interface StreamState {
   format: StreamFormat;
   startedAt: string | null;
   error: string | null;
+  ffmpegLog: string[];
   process: ChildProcess | null;
 }
 
@@ -54,6 +55,7 @@ const state: StreamState = {
   format: "landscape",
   startedAt: null,
   error: null,
+  ffmpegLog: [],
   process: null,
 };
 
@@ -65,6 +67,7 @@ function getPublicState() {
     format: state.format,
     startedAt: state.startedAt,
     error: state.error,
+    ffmpegLog: state.ffmpegLog.slice(-20),
   };
 }
 
@@ -190,19 +193,54 @@ router.post("/start", (req, res) => {
   state.format = (format === "shorts" ? "shorts" : "landscape") as StreamFormat;
   state.startedAt = new Date().toISOString();
   state.error = null;
+  state.ffmpegLog = [];
   state.process = proc;
+
+  // Capture FFmpeg output (FFmpeg writes progress/errors to stderr)
+  let stderrBuf = "";
+  proc.stderr.on("data", (chunk: Buffer) => {
+    stderrBuf += chunk.toString();
+    const lines = stderrBuf.split("\n");
+    stderrBuf = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed) state.ffmpegLog.push(trimmed);
+    }
+    if (state.ffmpegLog.length > 100) state.ffmpegLog = state.ffmpegLog.slice(-100);
+  });
 
   proc.on("error", (err) => {
     state.isStreaming = false;
-    state.error = err.message;
+    state.error = err.message === "spawn ffmpeg ENOENT"
+      ? "FFmpeg não encontrado no servidor. Verifique a instalação."
+      : err.message;
     state.process = null;
   });
 
   proc.on("close", (code) => {
     state.isStreaming = false;
     state.process = null;
-    if (code !== 0 && code !== null) {
-      state.error = `FFmpeg encerrou com código ${code}`;
+    if (stderrBuf.trim()) state.ffmpegLog.push(stderrBuf.trim());
+    const findLastMatch = (lines: string[], pred: (l: string) => boolean): string | undefined => {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (pred(lines[i]!)) return lines[i];
+      }
+      return undefined;
+    };
+    if (code !== 0) {
+      const rtmpError = findLastMatch(state.ffmpegLog,
+        (l) => l.includes("rtmp") || l.includes("Connection") || l.includes("Failed") || l.includes("refused") || l.includes("error") || l.includes("Error")
+      );
+      state.error = rtmpError
+        ? `Stream key inválida ou expirada: ${rtmpError}`
+        : `FFmpeg encerrou com código ${code}. Verifique a stream key e tente novamente.`;
+    } else {
+      const rtmpError = findLastMatch(state.ffmpegLog,
+        (l) => l.includes("rtmp") || l.includes("Connection") || l.includes("refused") || l.includes("RTMP")
+      );
+      if (rtmpError) {
+        state.error = `YouTube recusou a conexão: ${rtmpError}`;
+      }
     }
   });
 
