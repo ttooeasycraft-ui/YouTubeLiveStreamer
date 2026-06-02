@@ -19,11 +19,19 @@ function getSavedBackendUrl(): string {
   return localStorage.getItem("backendUrl") || "";
 }
 
+function normalizeBackendUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  // Auto-prepend https:// if no protocol given
+  if (!/^https?:\/\//i.test(trimmed)) return `https://${trimmed}`;
+  return trimmed;
+}
+
 function applyBackendUrl(url: string) {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  if (trimmed) {
-    localStorage.setItem("backendUrl", trimmed);
-    setBaseUrl(trimmed);
+  const normalized = normalizeBackendUrl(url);
+  if (normalized) {
+    localStorage.setItem("backendUrl", normalized);
+    setBaseUrl(normalized);
   } else {
     localStorage.removeItem("backendUrl");
     setBaseUrl(null);
@@ -78,6 +86,7 @@ function StreamerApp() {
   const [streamKey, setStreamKey] = useState("");
   const [selectedVideo, setSelectedVideo] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [format, setFormat] = useState<"landscape" | "shorts">("landscape");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
@@ -174,11 +183,32 @@ function StreamerApp() {
     });
   }
 
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<"ok" | "fail" | null>(null);
+
   function saveBackendUrl() {
-    applyBackendUrl(backendUrlDraft);
-    setBackendUrlState(backendUrlDraft.trim().replace(/\/+$/, ""));
+    const normalized = normalizeBackendUrl(backendUrlDraft);
+    applyBackendUrl(normalized);
+    setBackendUrlDraft(normalized);
+    setBackendUrlState(normalized);
+    setConnectionTestResult(null);
     qc.invalidateQueries({ queryKey: getGetStreamStatusQueryKey() });
     qc.invalidateQueries({ queryKey: getListVideosQueryKey() });
+  }
+
+  async function testConnection() {
+    const url = normalizeBackendUrl(backendUrlDraft);
+    if (!url) return;
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+    try {
+      const res = await fetch(`${url}/api/healthz`, { signal: AbortSignal.timeout(8000) });
+      setConnectionTestResult(res.ok ? "ok" : "fail");
+    } catch {
+      setConnectionTestResult("fail");
+    } finally {
+      setTestingConnection(false);
+    }
   }
 
   return (
@@ -235,21 +265,34 @@ function StreamerApp() {
               </p>
               <div className="flex gap-2">
                 <input
-                  type="url"
+                  type="text"
                   value={backendUrlDraft}
-                  onChange={(e) => setBackendUrlDraft(e.target.value)}
-                  placeholder="https://your-app.railway.app"
+                  onChange={(e) => { setBackendUrlDraft(e.target.value); setConnectionTestResult(null); }}
+                  placeholder="youtubelivestreamer-production.up.railway.app"
                   className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/30"
                 />
                 <button
+                  onClick={testConnection}
+                  disabled={testingConnection || !backendUrlDraft.trim()}
+                  className="px-3 py-2.5 rounded-xl text-sm font-semibold border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-40 transition-colors whitespace-nowrap"
+                >
+                  {testingConnection ? "…" : "Test"}
+                </button>
+                <button
                   onClick={saveBackendUrl}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-black btn-accent"
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-black btn-accent whitespace-nowrap"
                 >
                   Save
                 </button>
               </div>
+              {connectionTestResult === "ok" && (
+                <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">✅ Connected! Click Save to apply.</p>
+              )}
+              {connectionTestResult === "fail" && (
+                <p className="text-xs text-red-400 mt-1.5">❌ Could not reach backend. Make sure the URL is correct and Railway is deployed.</p>
+              )}
               <p className="text-xs text-white/25 mt-1.5">
-                Leave empty when using Railway or Replit directly.
+                Paste your Railway URL (with or without https://) then Test → Save.
               </p>
             </div>
 
@@ -381,7 +424,7 @@ function StreamerApp() {
             )}
           </div>
 
-          {/* Step 2: Stream Key */}
+          {/* Step 2: Stream Key + Format */}
           <div className="bg-[#111] border border-white/5 rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-4">
               <span className="step-badge w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0">2</span>
@@ -404,6 +447,37 @@ function StreamerApp() {
                   : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                 }
               </button>
+            </div>
+
+            {/* Format selector */}
+            <div className="mt-4">
+              <p className="text-xs text-white/25 uppercase tracking-wider mb-2">Stream Format</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setFormat("landscape")}
+                  className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border text-sm font-medium transition-all ${format === "landscape" ? "border-[--accent] bg-[rgba(var(--accent-rgb),0.12)] text-white" : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"}`}
+                >
+                  {/* 16:9 icon */}
+                  <svg viewBox="0 0 32 18" className="w-8 h-5" fill="none">
+                    <rect x="1" y="1" width="30" height="16" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M12 9l5-3v6l-5-3z" fill="currentColor" opacity="0.6"/>
+                  </svg>
+                  <span className="text-xs">Landscape</span>
+                  <span className="text-[10px] text-white/30">16:9 · YouTube</span>
+                </button>
+                <button
+                  onClick={() => setFormat("shorts")}
+                  className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border text-sm font-medium transition-all ${format === "shorts" ? "border-[--accent] bg-[rgba(var(--accent-rgb),0.12)] text-white" : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"}`}
+                >
+                  {/* 9:16 icon */}
+                  <svg viewBox="0 0 18 32" className="w-5 h-8" fill="none">
+                    <rect x="1" y="1" width="16" height="30" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M9 13l4 3-4 3V13z" fill="currentColor" opacity="0.6"/>
+                  </svg>
+                  <span className="text-xs">Shorts</span>
+                  <span className="text-[10px] text-white/30">9:16 · Vertical</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -428,7 +502,7 @@ function StreamerApp() {
               </button>
             ) : (
               <button
-                onClick={() => startMutation.mutate({ data: { streamKey: streamKey.trim(), videoFile: selectedVideo } })}
+                onClick={() => startMutation.mutate({ data: { streamKey: streamKey.trim(), videoFile: selectedVideo, format } })}
                 disabled={!streamKey.trim() || !selectedVideo || startMutation.isPending || uploading || needsBackendSetup}
                 className="w-full py-4 rounded-xl font-bold text-sm text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed btn-accent"
               >
