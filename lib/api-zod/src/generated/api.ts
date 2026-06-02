@@ -34,11 +34,12 @@ export const GetStreamStatusResponse = zod.object({
  */
 
 
-
+export const startStreamBodyFormatDefault = `landscape`;
 
 export const StartStreamBody = zod.object({
   "streamKey": zod.string().min(1),
-  "videoFile": zod.string().min(1)
+  "videoFile": zod.string().min(1),
+  "format": zod.enum(['landscape', 'shorts']).default(startStreamBodyFormatDefault)
 })
 
 export const StartStreamResponse = zod.object({
