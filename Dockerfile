@@ -36,5 +36,8 @@ COPY --from=builder /app/artifacts/live-streamer/dist/public/ artifacts/live-str
 RUN mkdir -p uploads
 
 ENV NODE_ENV=production
+ENV PORT=8080
+
+EXPOSE 8080
 
 CMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
