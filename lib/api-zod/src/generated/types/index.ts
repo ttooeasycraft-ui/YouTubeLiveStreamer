@@ -9,5 +9,6 @@
 export * from './errorResponse';
 export * from './healthStatus';
 export * from './streamInput';
+export * from './streamInputFormat';
 export * from './streamStatus';
 export * from './videoFile';
