@@ -1,9 +1,8 @@
 import { Router } from "express";
-import { spawn, ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { z } from "zod/v4";
 import { StartStreamBody } from "@workspace/api-zod";
 
 const router = Router();
@@ -36,19 +35,23 @@ const upload = multer({
   },
 });
 
+type StreamFormat = "landscape" | "shorts";
+
 interface StreamState {
   isStreaming: boolean;
   videoFile: string | null;
   streamKey: string | null;
+  format: StreamFormat;
   startedAt: string | null;
   error: string | null;
-  process: ChildProcessWithoutNullStreams | null;
+  process: ChildProcess | null;
 }
 
 const state: StreamState = {
   isStreaming: false,
   videoFile: null,
   streamKey: null,
+  format: "landscape",
   startedAt: null,
   error: null,
   process: null,
@@ -59,6 +62,7 @@ function getPublicState() {
     isStreaming: state.isStreaming,
     videoFile: state.videoFile,
     streamKey: state.streamKey ? state.streamKey.slice(0, 4) + "****" : null,
+    format: state.format,
     startedAt: state.startedAt,
     error: state.error,
   };
@@ -146,7 +150,7 @@ router.post("/start", (req, res) => {
     return;
   }
 
-  const { streamKey, videoFile } = parsed.data;
+  const { streamKey, videoFile, format = "landscape" } = parsed.data;
   const filePath = path.join(UPLOADS_DIR, videoFile);
 
   if (!fs.existsSync(filePath)) {
@@ -156,14 +160,18 @@ router.post("/start", (req, res) => {
 
   const rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${streamKey}`;
 
+  // Shorts = portrait 1080×1920 (9:16). Scale to fit, pad with black bars.
+  const shortsFilter = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1";
+
   const ffmpegArgs = [
     "-re",
     "-stream_loop", "-1",
     "-i", filePath,
+    ...(format === "shorts" ? ["-vf", shortsFilter] : []),
     "-c:v", "libx264",
     "-preset", "veryfast",
-    "-maxrate", "3000k",
-    "-bufsize", "6000k",
+    "-maxrate", format === "shorts" ? "2500k" : "3000k",
+    "-bufsize", format === "shorts" ? "5000k" : "6000k",
     "-pix_fmt", "yuv420p",
     "-g", "50",
     "-c:a", "aac",
@@ -179,6 +187,7 @@ router.post("/start", (req, res) => {
   state.isStreaming = true;
   state.videoFile = videoFile;
   state.streamKey = streamKey;
+  state.format = (format === "shorts" ? "shorts" : "landscape") as StreamFormat;
   state.startedAt = new Date().toISOString();
   state.error = null;
   state.process = proc;
