@@ -150,13 +150,22 @@ function StreamerApp() {
       xhr.onload = () => {
         setUploading(false);
         if (xhr.status === 200) {
-          const data = JSON.parse(xhr.responseText);
-          qc.invalidateQueries({ queryKey: getListVideosQueryKey() });
-          setSelectedVideo(data.filename);
-          resolve();
+          try {
+            const data = JSON.parse(xhr.responseText);
+            qc.invalidateQueries({ queryKey: getListVideosQueryKey() });
+            setSelectedVideo(data.filename);
+            resolve();
+          } catch {
+            setUploadError("Upload failed: invalid server response");
+            reject();
+          }
         } else {
-          const err = JSON.parse(xhr.responseText);
-          setUploadError(err.error || "Upload failed");
+          try {
+            const err = JSON.parse(xhr.responseText);
+            setUploadError(err.error || "Upload failed");
+          } catch {
+            setUploadError(`Upload failed (${xhr.status})`);
+          }
           reject();
         }
       };
