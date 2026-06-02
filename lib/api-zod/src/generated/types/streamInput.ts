@@ -5,10 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { StreamInputFormat } from './streamInputFormat';
 
 export interface StreamInput {
   /** @minLength 1 */
   streamKey: string;
   /** @minLength 1 */
   videoFile: string;
+  format?: StreamInputFormat;
 }
