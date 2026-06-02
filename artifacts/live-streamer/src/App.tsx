@@ -362,8 +362,14 @@ function StreamerApp() {
           )}
 
           {status?.error && !isStreaming && (
-            <div className="rounded-2xl p-4 bg-orange-950/40 border border-orange-800/40 text-sm text-orange-300">
-              ⚠️ {status.error}
+            <div className="rounded-2xl p-4 bg-red-950/50 border border-red-800/40 space-y-2">
+              <p className="text-sm text-red-300 font-semibold">❌ Stream parou — {status.error.length > 120 ? status.error.slice(0, 120) + "…" : status.error}</p>
+              <div className="bg-black/40 rounded-lg p-3 space-y-1 max-h-32 overflow-y-auto">
+                {(status as unknown as { ffmpegLog?: string[] }).ffmpegLog?.slice(-8).map((line, i) => (
+                  <p key={i} className="text-xs font-mono text-white/40 break-all">{line}</p>
+                ))}
+              </div>
+              <p className="text-xs text-red-400/70">💡 Verifique se a stream key está correta e se você ativou Go Live no YouTube Studio.</p>
             </div>
           )}
 
