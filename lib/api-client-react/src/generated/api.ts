@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  DeleteVideo200,
   ErrorResponse,
   HealthStatus,
   StreamInput,
@@ -411,4 +412,74 @@ export function useListVideos<TData = Awaited<ReturnType<typeof listVideos>>, TE
 
 
 
+
+export const getDeleteVideoUrl = (filename: string,) => {
+
+
+
+
+  return `/api/stream/videos/${filename}`
+}
+
+/**
+ * @summary Delete an uploaded video
+ */
+export const deleteVideo = async (filename: string, options?: RequestInit): Promise<DeleteVideo200> => {
+
+  return customFetch<DeleteVideo200>(getDeleteVideoUrl(filename),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteVideoMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteVideo>>, TError,{filename: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteVideo>>, TError,{filename: string}, TContext> => {
+
+const mutationKey = ['deleteVideo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteVideo>>, {filename: string}> = (props) => {
+          const {filename} = props ?? {};
+
+          return  deleteVideo(filename,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteVideoMutationResult = NonNullable<Awaited<ReturnType<typeof deleteVideo>>>
+
+    export type DeleteVideoMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete an uploaded video
+ */
+export const useDeleteVideo = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteVideo>>, TError,{filename: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteVideo>>,
+        TError,
+        {filename: string},
+        TContext
+      > => {
+      return useMutation(getDeleteVideoMutationOptions(options));
+    }
 
