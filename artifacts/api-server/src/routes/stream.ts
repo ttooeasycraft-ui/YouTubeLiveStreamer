@@ -71,6 +71,14 @@ function getPublicState() {
   };
 }
 
+function killProcess(proc: ChildProcess) {
+  try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+  const timer = setTimeout(() => {
+    try { proc.kill("SIGKILL"); } catch { /* ignore */ }
+  }, 3000);
+  proc.once("exit", () => clearTimeout(timer));
+}
+
 router.get("/status", (_req, res) => {
   res.json(getPublicState());
 });
@@ -105,6 +113,39 @@ router.get("/videos", (_req, res) => {
     });
 
   res.json(files);
+});
+
+router.delete("/videos/:filename", (req, res) => {
+  const { filename } = req.params;
+
+  if (!filename || filename.includes("..") || filename.includes("/")) {
+    res.status(400).json({ error: "Nome de arquivo inválido." });
+    return;
+  }
+
+  if (state.isStreaming && state.videoFile === filename) {
+    res.status(409).json({ error: "Não é possível deletar o vídeo enquanto a live está ativa." });
+    return;
+  }
+
+  const filePath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "Arquivo não encontrado." });
+    return;
+  }
+
+  fs.unlinkSync(filePath);
+
+  const metaPath = path.join(UPLOADS_DIR, "meta.json");
+  if (fs.existsSync(metaPath)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+      delete meta[filename];
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    } catch { /* ignore */ }
+  }
+
+  res.json({ deleted: filename });
 });
 
 router.post("/upload", (req, res) => {
@@ -253,10 +294,12 @@ router.post("/stop", (_req, res) => {
     return;
   }
 
-  state.process.kill("SIGTERM");
+  const proc = state.process;
   state.isStreaming = false;
   state.process = null;
   state.error = null;
+
+  killProcess(proc);
 
   res.json(getPublicState());
 });
