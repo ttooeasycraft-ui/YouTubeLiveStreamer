@@ -100,6 +100,41 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/VideoFile"
+  /stream/videos/{filename}:
+    delete:
+      operationId: deleteVideo
+      tags: [stream]
+      summary: Delete an uploaded video
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Video deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: string
+                required:
+                  - deleted
+        "404":
+          description: Video not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Cannot delete video currently streaming
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
