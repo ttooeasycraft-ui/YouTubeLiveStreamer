@@ -9,7 +9,6 @@ import * as zod from 'zod';
 
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -22,10 +21,17 @@ export const HealthCheckResponse = zod.object({
  */
 export const GetStreamStatusResponse = zod.object({
   "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
   "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
   "startedAt": zod.string().nullable(),
-  "error": zod.string().nullable()
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
 })
 
 
@@ -35,19 +41,33 @@ export const GetStreamStatusResponse = zod.object({
 
 
 export const startStreamBodyFormatDefault = `landscape`;
+export const startStreamBodyVolumeDefault = 100;
+export const startStreamBodyVolumeMin = 0;
+export const startStreamBodyVolumeMax = 100;
+
+export const startStreamBodyPlaylistDefault = [];
 
 export const StartStreamBody = zod.object({
   "streamKey": zod.string().min(1),
   "videoFile": zod.string().min(1),
-  "format": zod.enum(['landscape', 'shorts']).default(startStreamBodyFormatDefault)
+  "format": zod.enum(['landscape', 'shorts']).default(startStreamBodyFormatDefault),
+  "volume": zod.number().min(startStreamBodyVolumeMin).max(startStreamBodyVolumeMax).default(startStreamBodyVolumeDefault),
+  "playlist": zod.array(zod.string()).default(startStreamBodyPlaylistDefault)
 })
 
 export const StartStreamResponse = zod.object({
   "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
   "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
   "startedAt": zod.string().nullable(),
-  "error": zod.string().nullable()
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
 })
 
 
@@ -56,10 +76,132 @@ export const StartStreamResponse = zod.object({
  */
 export const StopStreamResponse = zod.object({
   "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
   "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
   "startedAt": zod.string().nullable(),
-  "error": zod.string().nullable()
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
+})
+
+
+/**
+ * @summary Pause stream (switches to black frame + silence, keeps RTMP alive)
+ */
+export const PauseStreamResponse = zod.object({
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
+})
+
+
+/**
+ * @summary Resume stream after pause
+ */
+export const ResumeStreamResponse = zod.object({
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
+})
+
+
+/**
+ * @summary Change volume of running stream (restarts FFmpeg with new volume)
+ */
+export const setVolumeBodyVolumeMin = 0;
+export const setVolumeBodyVolumeMax = 100;
+
+
+
+export const SetVolumeBody = zod.object({
+  "volume": zod.number().min(setVolumeBodyVolumeMin).max(setVolumeBodyVolumeMax)
+})
+
+export const SetVolumeResponse = zod.object({
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
+})
+
+
+/**
+ * @summary Switch to a different video without stopping the live stream
+ */
+
+
+
+export const SwitchVideoBody = zod.object({
+  "videoFile": zod.string().min(1)
+})
+
+export const SwitchVideoResponse = zod.object({
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
+})
+
+
+/**
+ * @summary Set the playlist queue (ordered list of video filenames)
+ */
+export const UpdatePlaylistBody = zod.object({
+  "playlist": zod.array(zod.string())
+})
+
+export const UpdatePlaylistResponse = zod.object({
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist'])
 })
 
 
@@ -84,6 +226,60 @@ export const DeleteVideoParams = zod.object({
 
 export const DeleteVideoResponse = zod.object({
   "deleted": zod.string()
+})
+
+
+/**
+ * @summary List videos from a public YouTube channel or playlist URL
+ */
+
+
+
+export const ImportChannelListBody = zod.object({
+  "url": zod.string().min(1)
+})
+
+export const ImportChannelListResponse = zod.object({
+  "videos": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "duration": zod.number().nullish(),
+  "thumbnail": zod.string().nullish(),
+  "url": zod.string()
+}))
+})
+
+
+/**
+ * @summary Start downloading a YouTube video into the uploads folder
+ */
+
+
+
+export const ImportDownloadBody = zod.object({
+  "url": zod.string().min(1),
+  "title": zod.string().optional()
+})
+
+export const ImportDownloadResponse = zod.object({
+  "jobId": zod.string(),
+  "title": zod.string()
+})
+
+
+/**
+ * @summary Get download progress for a specific job
+ */
+export const ImportProgressParams = zod.object({
+  "jobId": zod.coerce.string()
+})
+
+export const ImportProgressResponse = zod.object({
+  "jobId": zod.string(),
+  "status": zod.enum(['downloading', 'done', 'error']),
+  "percent": zod.number(),
+  "filename": zod.string().nullish(),
+  "error": zod.string().nullish()
 })
 
 
