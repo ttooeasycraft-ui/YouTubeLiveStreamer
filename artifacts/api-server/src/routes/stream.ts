@@ -161,7 +161,7 @@ router.post("/start", (req, res) => {
     return;
   }
 
-  const rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${streamKey}`;
+  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${streamKey}`;
 
   // Shorts = portrait 1080×1920 (9:16). Scale to fit, pad with black bars.
   const shortsFilter = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1";
