@@ -23,9 +23,17 @@ import type {
   DeleteVideo200,
   ErrorResponse,
   HealthStatus,
+  ImportDownloadInput,
+  ImportDownloadResult,
+  ImportListInput,
+  ImportListResult,
+  ImportProgressResult,
+  PlaylistInput,
   StreamInput,
   StreamStatus,
-  VideoFile
+  SwitchVideoInput,
+  VideoFile,
+  VolumeInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -49,7 +57,6 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const healthCheck = async ( options?: RequestInit): Promise<HealthStatus> => {
@@ -336,6 +343,359 @@ export const useStopStream = <TError = ErrorType<ErrorResponse>,
       return useMutation(getStopStreamMutationOptions(options));
     }
 
+export const getPauseStreamUrl = () => {
+
+
+
+
+  return `/api/stream/pause`
+}
+
+/**
+ * @summary Pause stream (switches to black frame + silence, keeps RTMP alive)
+ */
+export const pauseStream = async ( options?: RequestInit): Promise<StreamStatus> => {
+
+  return customFetch<StreamStatus>(getPauseStreamUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPauseStreamMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pauseStream>>, TError,void, TContext> => {
+
+const mutationKey = ['pauseStream'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pauseStream>>, void> = () => {
+
+
+          return  pauseStream(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PauseStreamMutationResult = NonNullable<Awaited<ReturnType<typeof pauseStream>>>
+
+    export type PauseStreamMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Pause stream (switches to black frame + silence, keeps RTMP alive)
+ */
+export const usePauseStream = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pauseStream>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getPauseStreamMutationOptions(options));
+    }
+
+export const getResumeStreamUrl = () => {
+
+
+
+
+  return `/api/stream/resume`
+}
+
+/**
+ * @summary Resume stream after pause
+ */
+export const resumeStream = async ( options?: RequestInit): Promise<StreamStatus> => {
+
+  return customFetch<StreamStatus>(getResumeStreamUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResumeStreamMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeStream>>, TError,void, TContext> => {
+
+const mutationKey = ['resumeStream'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeStream>>, void> = () => {
+
+
+          return  resumeStream(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeStreamMutationResult = NonNullable<Awaited<ReturnType<typeof resumeStream>>>
+
+    export type ResumeStreamMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Resume stream after pause
+ */
+export const useResumeStream = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeStream>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getResumeStreamMutationOptions(options));
+    }
+
+export const getSetVolumeUrl = () => {
+
+
+
+
+  return `/api/stream/volume`
+}
+
+/**
+ * @summary Change volume of running stream (restarts FFmpeg with new volume)
+ */
+export const setVolume = async (volumeInput: VolumeInput, options?: RequestInit): Promise<StreamStatus> => {
+
+  return customFetch<StreamStatus>(getSetVolumeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      volumeInput,)
+  }
+);}
+
+
+
+
+export const getSetVolumeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVolume>>, TError,{data: BodyType<VolumeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setVolume>>, TError,{data: BodyType<VolumeInput>}, TContext> => {
+
+const mutationKey = ['setVolume'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setVolume>>, {data: BodyType<VolumeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setVolume(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetVolumeMutationResult = NonNullable<Awaited<ReturnType<typeof setVolume>>>
+    export type SetVolumeMutationBody = BodyType<VolumeInput>
+    export type SetVolumeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change volume of running stream (restarts FFmpeg with new volume)
+ */
+export const useSetVolume = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVolume>>, TError,{data: BodyType<VolumeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setVolume>>,
+        TError,
+        {data: BodyType<VolumeInput>},
+        TContext
+      > => {
+      return useMutation(getSetVolumeMutationOptions(options));
+    }
+
+export const getSwitchVideoUrl = () => {
+
+
+
+
+  return `/api/stream/switch-video`
+}
+
+/**
+ * @summary Switch to a different video without stopping the live stream
+ */
+export const switchVideo = async (switchVideoInput: SwitchVideoInput, options?: RequestInit): Promise<StreamStatus> => {
+
+  return customFetch<StreamStatus>(getSwitchVideoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      switchVideoInput,)
+  }
+);}
+
+
+
+
+export const getSwitchVideoMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchVideo>>, TError,{data: BodyType<SwitchVideoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof switchVideo>>, TError,{data: BodyType<SwitchVideoInput>}, TContext> => {
+
+const mutationKey = ['switchVideo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof switchVideo>>, {data: BodyType<SwitchVideoInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  switchVideo(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SwitchVideoMutationResult = NonNullable<Awaited<ReturnType<typeof switchVideo>>>
+    export type SwitchVideoMutationBody = BodyType<SwitchVideoInput>
+    export type SwitchVideoMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Switch to a different video without stopping the live stream
+ */
+export const useSwitchVideo = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchVideo>>, TError,{data: BodyType<SwitchVideoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof switchVideo>>,
+        TError,
+        {data: BodyType<SwitchVideoInput>},
+        TContext
+      > => {
+      return useMutation(getSwitchVideoMutationOptions(options));
+    }
+
+export const getUpdatePlaylistUrl = () => {
+
+
+
+
+  return `/api/stream/playlist`
+}
+
+/**
+ * @summary Set the playlist queue (ordered list of video filenames)
+ */
+export const updatePlaylist = async (playlistInput: PlaylistInput, options?: RequestInit): Promise<StreamStatus> => {
+
+  return customFetch<StreamStatus>(getUpdatePlaylistUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      playlistInput,)
+  }
+);}
+
+
+
+
+export const getUpdatePlaylistMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlaylist>>, TError,{data: BodyType<PlaylistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePlaylist>>, TError,{data: BodyType<PlaylistInput>}, TContext> => {
+
+const mutationKey = ['updatePlaylist'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePlaylist>>, {data: BodyType<PlaylistInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updatePlaylist(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePlaylistMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlaylist>>>
+    export type UpdatePlaylistMutationBody = BodyType<PlaylistInput>
+    export type UpdatePlaylistMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Set the playlist queue (ordered list of video filenames)
+ */
+export const useUpdatePlaylist = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlaylist>>, TError,{data: BodyType<PlaylistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePlaylist>>,
+        TError,
+        {data: BodyType<PlaylistInput>},
+        TContext
+      > => {
+      return useMutation(getUpdatePlaylistMutationOptions(options));
+    }
+
 export const getListVideosUrl = () => {
 
 
@@ -482,4 +842,223 @@ export const useDeleteVideo = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getDeleteVideoMutationOptions(options));
     }
+
+export const getImportChannelListUrl = () => {
+
+
+
+
+  return `/api/stream/import/list`
+}
+
+/**
+ * @summary List videos from a public YouTube channel or playlist URL
+ */
+export const importChannelList = async (importListInput: ImportListInput, options?: RequestInit): Promise<ImportListResult> => {
+
+  return customFetch<ImportListResult>(getImportChannelListUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      importListInput,)
+  }
+);}
+
+
+
+
+export const getImportChannelListMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importChannelList>>, TError,{data: BodyType<ImportListInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importChannelList>>, TError,{data: BodyType<ImportListInput>}, TContext> => {
+
+const mutationKey = ['importChannelList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importChannelList>>, {data: BodyType<ImportListInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importChannelList(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportChannelListMutationResult = NonNullable<Awaited<ReturnType<typeof importChannelList>>>
+    export type ImportChannelListMutationBody = BodyType<ImportListInput>
+    export type ImportChannelListMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary List videos from a public YouTube channel or playlist URL
+ */
+export const useImportChannelList = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importChannelList>>, TError,{data: BodyType<ImportListInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importChannelList>>,
+        TError,
+        {data: BodyType<ImportListInput>},
+        TContext
+      > => {
+      return useMutation(getImportChannelListMutationOptions(options));
+    }
+
+export const getImportDownloadUrl = () => {
+
+
+
+
+  return `/api/stream/import/download`
+}
+
+/**
+ * @summary Start downloading a YouTube video into the uploads folder
+ */
+export const importDownload = async (importDownloadInput: ImportDownloadInput, options?: RequestInit): Promise<ImportDownloadResult> => {
+
+  return customFetch<ImportDownloadResult>(getImportDownloadUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      importDownloadInput,)
+  }
+);}
+
+
+
+
+export const getImportDownloadMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importDownload>>, TError,{data: BodyType<ImportDownloadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importDownload>>, TError,{data: BodyType<ImportDownloadInput>}, TContext> => {
+
+const mutationKey = ['importDownload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importDownload>>, {data: BodyType<ImportDownloadInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importDownload(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportDownloadMutationResult = NonNullable<Awaited<ReturnType<typeof importDownload>>>
+    export type ImportDownloadMutationBody = BodyType<ImportDownloadInput>
+    export type ImportDownloadMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Start downloading a YouTube video into the uploads folder
+ */
+export const useImportDownload = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importDownload>>, TError,{data: BodyType<ImportDownloadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importDownload>>,
+        TError,
+        {data: BodyType<ImportDownloadInput>},
+        TContext
+      > => {
+      return useMutation(getImportDownloadMutationOptions(options));
+    }
+
+export const getImportProgressUrl = (jobId: string,) => {
+
+
+
+
+  return `/api/stream/import/progress/${jobId}`
+}
+
+/**
+ * @summary Get download progress for a specific job
+ */
+export const importProgress = async (jobId: string, options?: RequestInit): Promise<ImportProgressResult> => {
+
+  return customFetch<ImportProgressResult>(getImportProgressUrl(jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getImportProgressQueryKey = (jobId: string,) => {
+    return [
+    `/api/stream/import/progress/${jobId}`
+    ] as const;
+    }
+
+
+export const getImportProgressQueryOptions = <TData = Awaited<ReturnType<typeof importProgress>>, TError = ErrorType<ErrorResponse>>(jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof importProgress>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getImportProgressQueryKey(jobId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof importProgress>>> = ({ signal }) => importProgress(jobId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(jobId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof importProgress>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ImportProgressQueryResult = NonNullable<Awaited<ReturnType<typeof importProgress>>>
+export type ImportProgressQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get download progress for a specific job
+ */
+
+export function useImportProgress<TData = Awaited<ReturnType<typeof importProgress>>, TError = ErrorType<ErrorResponse>>(
+ jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof importProgress>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getImportProgressQueryOptions(jobId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
