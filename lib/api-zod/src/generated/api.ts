@@ -75,3 +75,15 @@ export const ListVideosResponseItem = zod.object({
 export const ListVideosResponse = zod.array(ListVideosResponseItem)
 
 
+/**
+ * @summary Delete an uploaded video
+ */
+export const DeleteVideoParams = zod.object({
+  "filename": zod.coerce.string()
+})
+
+export const DeleteVideoResponse = zod.object({
+  "deleted": zod.string()
+})
+
+
