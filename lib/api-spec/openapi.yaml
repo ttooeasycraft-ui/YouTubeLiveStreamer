@@ -18,7 +18,6 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -86,6 +85,126 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /stream/pause:
+    post:
+      operationId: pauseStream
+      tags: [stream]
+      summary: Pause stream (switches to black frame + silence, keeps RTMP alive)
+      responses:
+        "200":
+          description: Stream paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "404":
+          description: No active stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Stream already paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/resume:
+    post:
+      operationId: resumeStream
+      tags: [stream]
+      summary: Resume stream after pause
+      responses:
+        "200":
+          description: Stream resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "404":
+          description: No paused stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/volume:
+    post:
+      operationId: setVolume
+      tags: [stream]
+      summary: Change volume of running stream (restarts FFmpeg with new volume)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumeInput"
+      responses:
+        "200":
+          description: Volume updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "404":
+          description: No active stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/switch-video:
+    post:
+      operationId: switchVideo
+      tags: [stream]
+      summary: Switch to a different video without stopping the live stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SwitchVideoInput"
+      responses:
+        "200":
+          description: Video switched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No active stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/playlist:
+    post:
+      operationId: updatePlaylist
+      tags: [stream]
+      summary: Set the playlist queue (ordered list of video filenames)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaylistInput"
+      responses:
+        "200":
+          description: Playlist updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamStatus"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /stream/videos:
     get:
       operationId: listVideos
@@ -135,6 +254,90 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /stream/import/list:
+    post:
+      operationId: importChannelList
+      tags: [stream]
+      summary: List videos from a public YouTube channel or playlist URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportListInput"
+      responses:
+        "200":
+          description: List of channel videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportListResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: yt-dlp not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/import/download:
+    post:
+      operationId: importDownload
+      tags: [stream]
+      summary: Start downloading a YouTube video into the uploads folder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportDownloadInput"
+      responses:
+        "200":
+          description: Download started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportDownloadResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: yt-dlp not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/import/progress/{jobId}:
+    get:
+      operationId: importProgress
+      tags: [stream]
+      summary: Get download progress for a specific job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Download progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportProgressResult"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -149,20 +352,44 @@ components:
       properties:
         isStreaming:
           type: boolean
+        isPaused:
+          type: boolean
         videoFile:
           type: ["string", "null"]
         streamKey:
           type: ["string", "null"]
+        format:
+          type: ["string", "null"]
+        volume:
+          type: integer
         startedAt:
+          type: ["string", "null"]
+        pausedAt:
           type: ["string", "null"]
         error:
           type: ["string", "null"]
+        playlist:
+          type: array
+          items:
+            type: string
+        playlistIndex:
+          type: integer
+        loopMode:
+          type: string
+          enum: [single, playlist]
       required:
         - isStreaming
+        - isPaused
         - videoFile
         - streamKey
+        - format
+        - volume
         - startedAt
+        - pausedAt
         - error
+        - playlist
+        - playlistIndex
+        - loopMode
     StreamInput:
       type: object
       properties:
@@ -176,9 +403,45 @@ components:
           type: string
           enum: [landscape, shorts]
           default: landscape
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 100
+        playlist:
+          type: array
+          items:
+            type: string
+          default: []
       required:
         - streamKey
         - videoFile
+    VolumeInput:
+      type: object
+      properties:
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 100
+      required:
+        - volume
+    SwitchVideoInput:
+      type: object
+      properties:
+        videoFile:
+          type: string
+          minLength: 1
+      required:
+        - videoFile
+    PlaylistInput:
+      type: object
+      properties:
+        playlist:
+          type: array
+          items:
+            type: string
+      required:
+        - playlist
     VideoFile:
       type: object
       properties:
@@ -195,6 +458,76 @@ components:
         - originalName
         - size
         - uploadedAt
+    ImportListInput:
+      type: object
+      properties:
+        url:
+          type: string
+          minLength: 1
+      required:
+        - url
+    ImportListResult:
+      type: object
+      properties:
+        videos:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              duration:
+                type: ["integer", "null"]
+              thumbnail:
+                type: ["string", "null"]
+              url:
+                type: string
+            required:
+              - id
+              - title
+              - url
+      required:
+        - videos
+    ImportDownloadInput:
+      type: object
+      properties:
+        url:
+          type: string
+          minLength: 1
+        title:
+          type: string
+      required:
+        - url
+    ImportDownloadResult:
+      type: object
+      properties:
+        jobId:
+          type: string
+        title:
+          type: string
+      required:
+        - jobId
+        - title
+    ImportProgressResult:
+      type: object
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [downloading, done, error]
+        percent:
+          type: number
+        filename:
+          type: ["string", "null"]
+        error:
+          type: ["string", "null"]
+      required:
+        - jobId
+        - status
+        - percent
     ErrorResponse:
       type: object
       properties:
