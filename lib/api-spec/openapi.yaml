@@ -9,9 +9,8 @@ servers:
     description: Base API path
 tags:
   - name: health
-    description: Health operations
   - name: stream
-    description: YouTube Live streaming operations
+  - name: sessions
 paths:
   /healthz:
     get:
@@ -25,23 +24,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Legacy single-stream endpoints (operate on "default" session) ──────────
   /stream/status:
     get:
       operationId: getStreamStatus
       tags: [stream]
-      summary: Get current stream status
+      summary: Get default session status
       responses:
         "200":
           description: Stream status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
   /stream/start:
     post:
       operationId: startStream
       tags: [stream]
-      summary: Start streaming a video to YouTube Live in a loop
+      summary: Start streaming (default session)
       requestBody:
         required: true
         content:
@@ -54,7 +55,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "400":
           description: Bad request
           content:
@@ -62,7 +63,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Stream already running
+          description: Already running
           content:
             application/json:
               schema:
@@ -71,16 +72,16 @@ paths:
     post:
       operationId: stopStream
       tags: [stream]
-      summary: Stop the current live stream
+      summary: Stop streaming (default session)
       responses:
         "200":
-          description: Stream stopped
+          description: Stopped
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "404":
-          description: No stream running
+          description: Not running
           content:
             application/json:
               schema:
@@ -89,22 +90,22 @@ paths:
     post:
       operationId: pauseStream
       tags: [stream]
-      summary: Pause stream (switches to black frame + silence, keeps RTMP alive)
+      summary: Pause (default session)
       responses:
         "200":
-          description: Stream paused
+          description: Paused
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "404":
-          description: No active stream
+          description: Not running
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Stream already paused
+          description: Already paused
           content:
             application/json:
               schema:
@@ -113,16 +114,16 @@ paths:
     post:
       operationId: resumeStream
       tags: [stream]
-      summary: Resume stream after pause
+      summary: Resume (default session)
       responses:
         "200":
-          description: Stream resumed
+          description: Resumed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "404":
-          description: No paused stream
+          description: Not paused
           content:
             application/json:
               schema:
@@ -131,7 +132,7 @@ paths:
     post:
       operationId: setVolume
       tags: [stream]
-      summary: Change volume of running stream (restarts FFmpeg with new volume)
+      summary: Set volume (default session)
       requestBody:
         required: true
         content:
@@ -144,9 +145,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "404":
-          description: No active stream
+          description: Not running
           content:
             application/json:
               schema:
@@ -155,7 +156,7 @@ paths:
     post:
       operationId: switchVideo
       tags: [stream]
-      summary: Switch to a different video without stopping the live stream
+      summary: Switch video mid-stream (default session)
       requestBody:
         required: true
         content:
@@ -168,7 +169,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "400":
           description: Bad request
           content:
@@ -176,7 +177,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: No active stream
+          description: Not running
           content:
             application/json:
               schema:
@@ -185,7 +186,7 @@ paths:
     post:
       operationId: updatePlaylist
       tags: [stream]
-      summary: Set the playlist queue (ordered list of video filenames)
+      summary: Update playlist (default session)
       requestBody:
         required: true
         content:
@@ -198,13 +199,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StreamStatus"
+                $ref: "#/components/schemas/SessionState"
         "400":
           description: Bad request
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Videos ────────────────────────────────────────────────────────────────
   /stream/videos:
     get:
       operationId: listVideos
@@ -212,7 +215,7 @@ paths:
       summary: List uploaded videos
       responses:
         "200":
-          description: List of uploaded videos
+          description: Video list
           content:
             application/json:
               schema:
@@ -232,7 +235,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Video deleted
+          description: Deleted
           content:
             application/json:
               schema:
@@ -243,22 +246,330 @@ paths:
                 required:
                   - deleted
         "404":
-          description: Video not found
+          description: Not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Cannot delete video currently streaming
+          description: In use
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Multi-session ─────────────────────────────────────────────────────────
+  /stream/sessions:
+    get:
+      operationId: listSessions
+      tags: [sessions]
+      summary: List all live sessions
+      responses:
+        "200":
+          description: All sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionState"
+    post:
+      operationId: createSession
+      tags: [sessions]
+      summary: Create a new live session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionInput"
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+  /stream/sessions/{sessionId}:
+    get:
+      operationId: getSession
+      tags: [sessions]
+      summary: Get a specific session's status
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSession
+      tags: [sessions]
+      summary: Delete a session (must be stopped)
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: string
+                required:
+                  - deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Still streaming
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: renameSession
+      tags: [sessions]
+      summary: Rename a session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameSessionInput"
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/sessions/{sessionId}/start:
+    post:
+      operationId: startSession
+      tags: [sessions]
+      summary: Start streaming in a specific session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamInput"
+      responses:
+        "200":
+          description: Started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already streaming
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/sessions/{sessionId}/stop:
+    post:
+      operationId: stopSession
+      tags: [sessions]
+      summary: Stop a specific session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          description: Not found or not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/sessions/{sessionId}/pause:
+    post:
+      operationId: pauseSession
+      tags: [sessions]
+      summary: Pause a specific session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/sessions/{sessionId}/resume:
+    post:
+      operationId: resumeSession
+      tags: [sessions]
+      summary: Resume a specific session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/sessions/{sessionId}/volume:
+    post:
+      operationId: setSessionVolume
+      tags: [sessions]
+      summary: Set volume for a specific session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumeInput"
+      responses:
+        "200":
+          description: Volume updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stream/sessions/{sessionId}/switch-video:
+    post:
+      operationId: switchSessionVideo
+      tags: [sessions]
+      summary: Switch video for a specific session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SwitchVideoInput"
+      responses:
+        "200":
+          description: Video switched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Import (yt-dlp) ────────────────────────────────────────────────────────
   /stream/import/list:
     post:
       operationId: importChannelList
       tags: [stream]
-      summary: List videos from a public YouTube channel or playlist URL
+      summary: List videos from a public YouTube channel/playlist (yt-dlp)
       requestBody:
         required: true
         content:
@@ -267,7 +578,7 @@ paths:
               $ref: "#/components/schemas/ImportListInput"
       responses:
         "200":
-          description: List of channel videos
+          description: Videos found
           content:
             application/json:
               schema:
@@ -288,7 +599,7 @@ paths:
     post:
       operationId: importDownload
       tags: [stream]
-      summary: Start downloading a YouTube video into the uploads folder
+      summary: Start downloading a YouTube video
       requestBody:
         required: true
         content:
@@ -318,7 +629,7 @@ paths:
     get:
       operationId: importProgress
       tags: [stream]
-      summary: Get download progress for a specific job
+      summary: Get download progress
       parameters:
         - name: jobId
           in: path
@@ -327,7 +638,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Download progress
+          description: Progress
           content:
             application/json:
               schema:
@@ -338,6 +649,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -345,11 +657,15 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
-    StreamStatus:
+      required: [status]
+
+    SessionState:
       type: object
       properties:
+        id:
+          type: string
+        name:
+          type: string
         isStreaming:
           type: boolean
         isPaused:
@@ -377,7 +693,11 @@ components:
         loopMode:
           type: string
           enum: [single, playlist]
+        createdAt:
+          type: string
       required:
+        - id
+        - name
         - isStreaming
         - isPaused
         - videoFile
@@ -390,6 +710,8 @@ components:
         - playlist
         - playlistIndex
         - loopMode
+        - createdAt
+
     StreamInput:
       type: object
       properties:
@@ -416,6 +738,7 @@ components:
       required:
         - streamKey
         - videoFile
+
     VolumeInput:
       type: object
       properties:
@@ -423,16 +746,16 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-      required:
-        - volume
+      required: [volume]
+
     SwitchVideoInput:
       type: object
       properties:
         videoFile:
           type: string
           minLength: 1
-      required:
-        - videoFile
+      required: [videoFile]
+
     PlaylistInput:
       type: object
       properties:
@@ -440,8 +763,23 @@ components:
           type: array
           items:
             type: string
-      required:
-        - playlist
+      required: [playlist]
+
+    CreateSessionInput:
+      type: object
+      properties:
+        name:
+          type: string
+      required: [name]
+
+    RenameSessionInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+      required: [name]
+
     VideoFile:
       type: object
       properties:
@@ -453,19 +791,25 @@ components:
           type: integer
         uploadedAt:
           type: string
-      required:
-        - filename
-        - originalName
-        - size
-        - uploadedAt
+      required: [filename, originalName, size, uploadedAt]
+
     ImportListInput:
       type: object
       properties:
         url:
           type: string
           minLength: 1
-      required:
-        - url
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        sort:
+          type: string
+          enum: [newest, oldest]
+          default: newest
+      required: [url]
+
     ImportListResult:
       type: object
       properties:
@@ -484,12 +828,11 @@ components:
                 type: ["string", "null"]
               url:
                 type: string
-            required:
-              - id
-              - title
-              - url
-      required:
-        - videos
+            required: [id, title, url]
+        channelName:
+          type: ["string", "null"]
+      required: [videos]
+
     ImportDownloadInput:
       type: object
       properties:
@@ -498,8 +841,8 @@ components:
           minLength: 1
         title:
           type: string
-      required:
-        - url
+      required: [url]
+
     ImportDownloadResult:
       type: object
       properties:
@@ -507,9 +850,8 @@ components:
           type: string
         title:
           type: string
-      required:
-        - jobId
-        - title
+      required: [jobId, title]
+
     ImportProgressResult:
       type: object
       properties:
@@ -524,14 +866,11 @@ components:
           type: ["string", "null"]
         error:
           type: ["string", "null"]
-      required:
-        - jobId
-        - status
-        - percent
+      required: [jobId, status, percent]
+
     ErrorResponse:
       type: object
       properties:
         error:
           type: string
-      required:
-        - error
+      required: [error]
