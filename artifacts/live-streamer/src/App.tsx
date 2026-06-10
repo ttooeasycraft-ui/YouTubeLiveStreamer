@@ -396,6 +396,17 @@ function StreamerApp() {
   const [importSort, setImportSort] = useState<"newest" | "oldest">("newest");
   const [downloadJobs, setDownloadJobs] = useState<{ jobId: string; title: string }[]>([]);
 
+  // Duplo stream (landscape + shorts simultaneously)
+  const [duploMode, setDuploMode] = useState(false);
+  const [streamKeyShorts, setStreamKeyShorts] = useState("");
+  const [showKeyShorts, setShowKeyShorts] = useState(false);
+  const [duploStarting, setDuploStarting] = useState(false);
+
+  // Thumbnail
+  const [thumbFilename, setThumbFilename] = useState<string | null>(null);
+  const [thumbUploading, setThumbUploading] = useState(false);
+  const thumbInputRef = useRef<HTMLInputElement>(null);
+
   // New session
   const [newSessionName, setNewSessionName] = useState("");
   const [showNewSession, setShowNewSession] = useState(false);
@@ -538,6 +549,48 @@ function StreamerApp() {
     const p = { streamKey: streamKey.trim(), videoFile: selectedVideo, format, volume, playlist: pl };
     lastParams.current = p; startM.mutate({ data: p });
   }
+
+  async function handleDuploStart() {
+    if (!streamKey.trim() || !streamKeyShorts.trim() || !selectedVideo) return;
+    setDuploStarting(true);
+    try {
+      const apiBase = backendUrl ? `${backendUrl}/api/stream` : `${BASE}/api/stream`;
+      const headers = { "Content-Type": "application/json" };
+      const [r1, r2] = await Promise.all([
+        fetch(`${apiBase}/sessions`, { method: "POST", headers, body: JSON.stringify({ name: "Live Landscape (16:9)" }) }),
+        fetch(`${apiBase}/sessions`, { method: "POST", headers, body: JSON.stringify({ name: "Live Shorts (9:16)" }) }),
+      ]);
+      const [sess1, sess2] = await Promise.all([r1.json(), r2.json()]);
+      if (!sess1.id || !sess2.id) throw new Error("Falha ao criar sessões");
+      await Promise.all([
+        fetch(`${apiBase}/sessions/${sess1.id}/start`, { method: "POST", headers, body: JSON.stringify({ streamKey: streamKey.trim(), videoFile: selectedVideo, format: "landscape", volume }) }),
+        fetch(`${apiBase}/sessions/${sess2.id}/start`, { method: "POST", headers, body: JSON.stringify({ streamKey: streamKeyShorts.trim(), videoFile: selectedVideo, format: "shorts", volume }) }),
+      ]);
+      invSessions();
+      setTab("sessions");
+    } catch (e) {
+      alert("Erro ao iniciar stream duplo: " + (e instanceof Error ? e.message : "desconhecido"));
+    } finally {
+      setDuploStarting(false);
+    }
+  }
+
+  async function handleThumbUpload(file: File) {
+    setThumbUploading(true);
+    const form = new FormData(); form.append("thumbnail", file);
+    const url = backendUrl ? `${backendUrl}/api/stream/thumbnail` : `${BASE}/api/stream/thumbnail`;
+    try {
+      const r = await fetch(url, { method: "POST", body: form });
+      const data = await r.json();
+      if (r.ok && data.filename) setThumbFilename(data.filename);
+    } catch { /* ignore */ } finally { setThumbUploading(false); }
+  }
+
+  function getThumbUrl(filename: string) {
+    const base = backendUrl ? `${backendUrl}/api/stream` : `${BASE}/api/stream`;
+    return `${base}/thumbnail/view/${filename}`;
+  }
+
   function handleVolumeChange(v: number) { setVolume(v); if (isStreaming) volumeM.mutate({ data: { volume: v } }); }
   function handleSchedule() { const t = getScheduleTarget(scheduleTime); if (!t) return; setScheduleActive(true); setScheduleCountdown(fmtCountdown(t.getTime() - Date.now())); }
   function addToPlaylist(fn: string) { if (!playlist.includes(fn)) { const n = [...playlist, fn]; setPlaylist(n); if (isStreaming) playlistM.mutate({ data: { playlist: n } }); } }
@@ -699,21 +752,74 @@ function StreamerApp() {
             <div className="space-y-5">
               {/* Stream Key */}
               <div className="card p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">1</span>
-                  <h2 className="font-bold text-sm">Stream Key do YouTube</h2>
-                </div>
-                <div className="relative">
-                  <input type={showKey ? "text" : "password"} value={streamKey}
-                    onChange={(e) => setStreamKey(e.target.value)} disabled={isStreaming}
-                    placeholder="xxxx-xxxx-xxxx-xxxx-xxxx"
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none disabled:opacity-40 pr-20" />
-                  <button type="button" onClick={() => setShowKey(!showKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/25 hover:text-white/60">
-                    {showKey ? "Ocultar" : "Mostrar"}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">1</span>
+                    <h2 className="font-bold text-sm">Stream Key do YouTube</h2>
+                  </div>
+                  <button onClick={() => { if (!isStreaming) setDuploMode(!duploMode); }}
+                    disabled={isStreaming}
+                    title="Stream duplo: landscape + shorts ao mesmo tempo"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 ${duploMode ? "accent-bg text-black" : "btn-ghost text-white/50"}`}>
+                    🔀 Duplo
                   </button>
                 </div>
-                <p className="text-[11px] text-white/20 mt-2">YouTube Studio → Ir ao Vivo → Chave de stream</p>
+                <div className="space-y-2">
+                  <div className="relative">
+                    <input type={showKey ? "text" : "password"} value={streamKey}
+                      onChange={(e) => setStreamKey(e.target.value)} disabled={isStreaming}
+                      placeholder={duploMode ? "Landscape key (16:9)" : "xxxx-xxxx-xxxx-xxxx-xxxx"}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none disabled:opacity-40 pr-20" />
+                    <button type="button" onClick={() => setShowKey(!showKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/25 hover:text-white/60">
+                      {showKey ? "Ocultar" : "Mostrar"}
+                    </button>
+                  </div>
+                  {duploMode && (
+                    <div className="relative">
+                      <input type={showKeyShorts ? "text" : "password"} value={streamKeyShorts}
+                        onChange={(e) => setStreamKeyShorts(e.target.value)} disabled={isStreaming}
+                        placeholder="Shorts key (9:16)"
+                        className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none disabled:opacity-40 pr-20" />
+                      <button type="button" onClick={() => setShowKeyShorts(!showKeyShorts)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/25 hover:text-white/60">
+                        {showKeyShorts ? "Ocultar" : "Mostrar"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {duploMode ? (
+                  <p className="text-[11px] text-white/20 mt-2">🔀 Duas lives simultâneas: 16:9 e Shorts (9:16)</p>
+                ) : (
+                  <p className="text-[11px] text-white/20 mt-2">YouTube Studio → Ir ao Vivo → Chave de stream</p>
+                )}
+              </div>
+
+              {/* Thumbnail */}
+              <div className="card p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">🖼</span>
+                    <h2 className="font-bold text-sm">Thumbnail</h2>
+                  </div>
+                  <label className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${thumbUploading ? "opacity-40 cursor-wait" : "btn-ghost hover:opacity-80"}`}>
+                    {thumbUploading ? "Enviando…" : thumbFilename ? "Trocar" : "+ Upload"}
+                    <input ref={thumbInputRef} type="file" accept="image/*" className="hidden" disabled={thumbUploading}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleThumbUpload(f); e.target.value = ""; } }} />
+                  </label>
+                </div>
+                {thumbFilename ? (
+                  <div className="relative group">
+                    <img src={getThumbUrl(thumbFilename)} alt="Thumbnail"
+                      className="w-full rounded-xl object-cover max-h-32 bg-white/[0.04]" />
+                    <button onClick={() => setThumbFilename(null)}
+                      className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 text-white/60 hover:text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-white/20">Opcional — aparece nas miniaturas do YouTube</p>
+                )}
               </div>
 
               {/* Video */}
@@ -785,13 +891,19 @@ function StreamerApp() {
                   <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">3</span>
                   <h2 className="font-bold text-sm">Formato & Áudio</h2>
                 </div>
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                  {(["landscape", "shorts"] as const).map((f) => (
-                    <button key={f} onClick={() => setFormat(f)} disabled={isStreaming}
-                      className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${format === f ? "accent-bg text-black" : "btn-ghost text-white/50"} disabled:opacity-40`}>
-                      {f === "landscape" ? "🖥 16:9 (Normal)" : "📱 9:16 (Shorts)"}
-                    </button>
-                  ))}
+                <div className={`grid gap-2 mb-4 ${duploMode ? "grid-cols-1" : "grid-cols-2"}`}>
+                  {duploMode ? (
+                    <div className="py-2.5 rounded-xl text-sm font-semibold text-center accent-bg text-black">
+                      🔀 Duplo: 16:9 + 9:16 simultâneos
+                    </div>
+                  ) : (
+                    (["landscape", "shorts"] as const).map((f) => (
+                      <button key={f} onClick={() => setFormat(f)} disabled={isStreaming}
+                        className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${format === f ? "accent-bg text-black" : "btn-ghost text-white/50"} disabled:opacity-40`}>
+                        {f === "landscape" ? "🖥 16:9 (Normal)" : "📱 9:16 (Shorts)"}
+                      </button>
+                    ))
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-white/40"><VolumeIcon level={volume} /></div>
@@ -911,10 +1023,18 @@ function StreamerApp() {
 
               {/* Start button */}
               {!isStreaming && (
-                <button onClick={handleStart} disabled={!canStart}
-                  className="w-full py-4 rounded-2xl text-base font-bold text-black accent-bg accent-glow transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-                  {startM.isPending ? "Iniciando…" : "🔴 Iniciar Live"}
-                </button>
+                duploMode ? (
+                  <button onClick={handleDuploStart}
+                    disabled={!streamKey.trim() || !streamKeyShorts.trim() || !selectedVideo || duploStarting || uploading || needsBackend}
+                    className="w-full py-4 rounded-2xl text-base font-bold text-black accent-bg accent-glow transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+                    {duploStarting ? "Iniciando Duplo…" : "🔀 Iniciar Live Duplo"}
+                  </button>
+                ) : (
+                  <button onClick={handleStart} disabled={!canStart}
+                    className="w-full py-4 rounded-2xl text-base font-bold text-black accent-bg accent-glow transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+                    {startM.isPending ? "Iniciando…" : "🔴 Iniciar Live"}
+                  </button>
+                )
               )}
               {startM.isError && (
                 <p className="text-xs text-red-400 text-center">
