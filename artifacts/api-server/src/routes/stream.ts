@@ -11,6 +11,9 @@ const router = Router();
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
+const THUMBNAILS_DIR = path.join(UPLOADS_DIR, "thumbnails");
+if (!fs.existsSync(THUMBNAILS_DIR)) fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
@@ -26,6 +29,23 @@ const upload = multer({
     const allowed = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"];
     if (allowed.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
     else cb(new Error("Formato não suportado. Use MP4, MOV, AVI, MKV, WEBM ou FLV."));
+  },
+});
+
+const thumbStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, THUMBNAILS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `thumb_${Date.now()}${ext}`);
+  },
+});
+const uploadThumb = multer({
+  storage: thumbStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    if (allowed.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
+    else cb(new Error("Use JPG, PNG ou WebP."));
   },
 });
 
@@ -335,7 +355,6 @@ function saveMeta(filename: string, originalName: string) {
 function cleanYtUrl(raw: string): string {
   try {
     const u = new URL(raw.trim());
-    // Strip tracking-only params, keep playlist/video params
     const keep = ["list", "v", "index"];
     const params = new URLSearchParams();
     for (const k of keep) { const v = u.searchParams.get(k); if (v) params.set(k, v); }
@@ -344,6 +363,17 @@ function cleanYtUrl(raw: string): string {
   } catch {
     return raw.trim();
   }
+}
+
+// For LISTING: bare @handle channel URL → /videos tab so yt-dlp returns individual videos
+// instead of the channel's tab-playlists (Vídeos/Live/Shorts sections)
+function normalizeListUrl(raw: string): string {
+  const clean = cleanYtUrl(raw);
+  const isBarechannel = /^https?:\/\/(?:www\.)?youtube\.com\/@[^/?#]+\/?$/.test(clean);
+  if (isBarechannel) {
+    return clean.replace(/\/?$/, "") + "/videos";
+  }
+  return clean;
 }
 
 function ytDlpAvailable(): Promise<boolean> {
@@ -572,7 +602,8 @@ router.post("/import/list", async (req, res) => {
     res.status(400).json({ error: "Use uma URL do YouTube (canal, playlist ou vídeo)." }); return;
   }
 
-  const cleanUrl = cleanYtUrl(url);
+  // Use normalizeListUrl so bare @channel → @channel/videos (avoids returning tabs instead of videos)
+  const cleanUrl = normalizeListUrl(url);
   const clampedLimit = Math.max(1, Math.min(50, Number(limit) || 20));
 
   const args = [
@@ -599,18 +630,32 @@ router.post("/import/list", async (req, res) => {
       const channelName: string | null = data.channel ?? data.uploader ?? data.title ?? null;
 
       const videos = entries
-        .filter((e: Record<string, unknown>) => e.id)
+        .filter((e: Record<string, unknown>) => {
+          if (!e.id) return false;
+          // Skip entries that are playlists/tabs (channel structure returns tabs as playlist entries)
+          // _type === "playlist" or ie_key === "YoutubeTab" means it's a tab, not a video
+          if (e._type === "playlist") return false;
+          if (typeof e.ie_key === "string" && e.ie_key === "YoutubeTab") return false;
+          // If the url is a playlist url (/playlist?list=) without a watch?v=, skip it
+          const eUrl = String(e.url ?? e.webpage_url ?? "");
+          if (eUrl.includes("/playlist?list=") || (eUrl.includes("/@") && !eUrl.includes("/watch?v="))) return false;
+          return true;
+        })
         .map((e: Record<string, unknown>) => {
           const thumbnails = Array.isArray(e.thumbnails) ? e.thumbnails : [];
           const thumb = thumbnails.length > 0 ? (thumbnails[thumbnails.length - 1] as { url?: string })?.url : null;
-          const videoUrl = typeof e.url === "string" ? e.url
-            : typeof e.webpage_url === "string" ? e.webpage_url
-            : `https://www.youtube.com/watch?v=${e.id}`;
+          // Build the best video URL - prefer watch?v= links
+          const videoId = String(e.id);
+          const videoUrl = typeof e.webpage_url === "string" && e.webpage_url.includes("watch?v=")
+            ? e.webpage_url
+            : typeof e.url === "string" && e.url.includes("watch?v=")
+            ? e.url
+            : `https://www.youtube.com/watch?v=${videoId}`;
           return {
-            id: String(e.id),
+            id: videoId,
             title: typeof e.title === "string" ? e.title : "(sem título)",
             duration: typeof e.duration === "number" ? e.duration : null,
-            thumbnail: thumb ?? null,
+            thumbnail: thumb ?? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
             url: videoUrl,
           };
         });
@@ -640,13 +685,24 @@ router.post("/import/download", async (req, res) => {
   const job: DownloadJob = { jobId, status: "downloading", percent: 0, filename: null, error: null, title: title ?? "Vídeo" };
   downloadJobs.set(jobId, job);
 
+  const videoUrl = cleanYtUrl(url);
+
+  // Warn if this looks like a playlist/tab URL instead of a video
+  if (!videoUrl.includes("/watch?v=") && !videoUrl.includes("youtu.be/")) {
+    if (videoUrl.includes("/playlist?list=") || videoUrl.includes("/@") || videoUrl.includes("/channel/")) {
+      res.status(400).json({ error: "Esta URL é de um canal/playlist, não de um vídeo. Use a aba Importar para buscar e selecionar vídeos individuais." });
+      return;
+    }
+  }
+
   const proc = spawn("yt-dlp", [
     "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
     "--merge-output-format", "mp4",
     "--output", outputTemplate,
     "--no-playlist",
     "--newline",
-    cleanYtUrl(url),
+    "--no-warnings",
+    videoUrl,
   ]);
 
   const parseProgress = (text: string) => {
@@ -681,6 +737,30 @@ router.get("/import/progress/:jobId", (req, res) => {
   const job = downloadJobs.get(req.params.jobId);
   if (!job) { res.status(404).json({ error: "Job não encontrado." }); return; }
   res.json({ jobId: job.jobId, status: job.status, percent: job.percent, filename: job.filename, error: job.error });
+});
+
+// ── Thumbnail ─────────────────────────────────────────────────────────────────
+
+router.post("/thumbnail", (req, res) => {
+  uploadThumb.single("thumbnail")(req, res, (err) => {
+    if (err) { res.status(400).json({ error: err.message }); return; }
+    if (!req.file) { res.status(400).json({ error: "Nenhuma imagem enviada." }); return; }
+    res.json({ filename: req.file.filename });
+  });
+});
+
+router.get("/thumbnail/view/:filename", (req, res) => {
+  const { filename } = req.params;
+  if (!filename || filename.includes("..") || filename.includes("/")) {
+    res.status(400).json({ error: "Nome inválido." }); return;
+  }
+  const fp = path.join(THUMBNAILS_DIR, filename);
+  if (!fs.existsSync(fp)) { res.status(404).json({ error: "Thumbnail não encontrada." }); return; }
+  const ext = path.extname(fp).toLowerCase();
+  const mime: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif" };
+  res.setHeader("Content-Type", mime[ext] ?? "image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.sendFile(fp);
 });
 
 export default router;
