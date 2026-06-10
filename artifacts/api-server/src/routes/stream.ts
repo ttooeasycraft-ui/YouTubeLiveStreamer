@@ -9,9 +9,7 @@ import { StartStreamBody } from "@workspace/api-zod";
 const router = Router();
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -21,22 +19,24 @@ const storage = multer.diskStorage({
     cb(null, `${base}_${Date.now()}${ext}`);
   },
 });
-
 const upload = multer({
   storage,
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
+    if (allowed.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
     else cb(new Error("Formato não suportado. Use MP4, MOV, AVI, MKV, WEBM ou FLV."));
   },
 });
 
+// ── Types ────────────────────────────────────────────────────────────────────
+
 type StreamFormat = "landscape" | "shorts";
 type LoopMode = "single" | "playlist";
 
-interface StreamState {
+interface Session {
+  id: string;
+  name: string;
   isStreaming: boolean;
   isPaused: boolean;
   videoFile: string | null;
@@ -48,30 +48,12 @@ interface StreamState {
   error: string | null;
   ffmpegLog: string[];
   process: ChildProcess | null;
-  // playlist
   playlist: string[];
   playlistIndex: number;
   loopMode: LoopMode;
+  createdAt: string;
 }
 
-const state: StreamState = {
-  isStreaming: false,
-  isPaused: false,
-  videoFile: null,
-  streamKey: null,
-  format: "landscape",
-  volume: 100,
-  startedAt: null,
-  pausedAt: null,
-  error: null,
-  ffmpegLog: [],
-  process: null,
-  playlist: [],
-  playlistIndex: 0,
-  loopMode: "single",
-};
-
-// ── Download jobs (yt-dlp) ───────────────────────────────────────────────────
 interface DownloadJob {
   jobId: string;
   status: "downloading" | "done" | "error";
@@ -80,73 +62,95 @@ interface DownloadJob {
   error: string | null;
   title: string;
 }
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
+const sessions = new Map<string, Session>();
 const downloadJobs = new Map<string, DownloadJob>();
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+function createSession(id: string, name: string): Session {
+  const s: Session = {
+    id, name,
+    isStreaming: false, isPaused: false,
+    videoFile: null, streamKey: null,
+    format: "landscape", volume: 100,
+    startedAt: null, pausedAt: null, error: null,
+    ffmpegLog: [], process: null,
+    playlist: [], playlistIndex: 0, loopMode: "single",
+    createdAt: new Date().toISOString(),
+  };
+  sessions.set(id, s);
+  return s;
+}
 
-function getPublicState() {
+// Default session always exists
+const DEFAULT_ID = "default";
+createSession(DEFAULT_ID, "Live Principal");
+
+function getSession(id: string): Session | undefined {
+  return sessions.get(id);
+}
+
+function publicSession(s: Session) {
   return {
-    isStreaming: state.isStreaming,
-    isPaused: state.isPaused,
-    videoFile: state.videoFile,
-    streamKey: state.streamKey ? state.streamKey.slice(0, 4) + "****" : null,
-    format: state.format,
-    volume: state.volume,
-    startedAt: state.startedAt,
-    pausedAt: state.pausedAt,
-    error: state.error,
-    ffmpegLog: state.ffmpegLog.slice(-20),
-    playlist: state.playlist,
-    playlistIndex: state.playlistIndex,
-    loopMode: state.loopMode,
+    id: s.id,
+    name: s.name,
+    isStreaming: s.isStreaming,
+    isPaused: s.isPaused,
+    videoFile: s.videoFile,
+    streamKey: s.streamKey ? s.streamKey.slice(0, 4) + "****" : null,
+    format: s.format,
+    volume: s.volume,
+    startedAt: s.startedAt,
+    pausedAt: s.pausedAt,
+    error: s.error,
+    ffmpegLog: s.ffmpegLog.slice(-20),
+    playlist: s.playlist,
+    playlistIndex: s.playlistIndex,
+    loopMode: s.loopMode,
+    createdAt: s.createdAt,
   };
 }
 
+// ── FFmpeg helpers ────────────────────────────────────────────────────────────
+
 function killProcess(proc: ChildProcess) {
   try { proc.kill("SIGTERM"); } catch { /* ignore */ }
-  const timer = setTimeout(() => {
-    try { proc.kill("SIGKILL"); } catch { /* ignore */ }
-  }, 3000);
-  proc.once("exit", () => clearTimeout(timer));
+  const t = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* ignore */ } }, 3000);
+  proc.once("exit", () => clearTimeout(t));
 }
 
-function buildFfmpegArgs(
-  filePath: string,
-  rtmpUrl: string,
-  format: StreamFormat,
-  volume: number,
-  loopSingle = true,
-): string[] {
-  const volumeFilter = volume === 100 ? [] : ["-af", `volume=${(volume / 100).toFixed(2)}`];
+function appendLog(s: Session, line: string) {
+  const t = line.trim();
+  if (!t) return;
+  s.ffmpegLog.push(t);
+  if (s.ffmpegLog.length > 100) s.ffmpegLog = s.ffmpegLog.slice(-100);
+}
+
+function buildFfmpegArgs(filePath: string, rtmpUrl: string, format: StreamFormat, volume: number, loop = true): string[] {
   const shortsFilter = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1";
-  const videoFilter = format === "shorts" ? ["-vf", shortsFilter] : [];
+  const volFilter = volume !== 100 ? `volume=${(volume / 100).toFixed(2)}` : null;
 
-  let filters: string[] = [];
-  if (format === "shorts" && volume !== 100) {
-    filters = ["-vf", shortsFilter, "-af", `volume=${(volume / 100).toFixed(2)}`];
-  } else {
-    filters = [...videoFilter, ...volumeFilter];
+  let filterArgs: string[] = [];
+  if (format === "shorts" && volFilter) {
+    filterArgs = ["-vf", shortsFilter, "-af", volFilter];
+  } else if (format === "shorts") {
+    filterArgs = ["-vf", shortsFilter];
+  } else if (volFilter) {
+    filterArgs = ["-af", volFilter];
   }
-
-  const loopArgs = loopSingle ? ["-stream_loop", "-1"] : [];
 
   return [
     "-re",
-    ...loopArgs,
+    ...(loop ? ["-stream_loop", "-1"] : []),
     "-i", filePath,
-    ...filters,
-    "-c:v", "libx264",
-    "-preset", "veryfast",
+    ...filterArgs,
+    "-c:v", "libx264", "-preset", "veryfast",
     "-maxrate", format === "shorts" ? "2500k" : "3000k",
     "-bufsize", format === "shorts" ? "5000k" : "6000k",
-    "-pix_fmt", "yuv420p",
-    "-g", "50",
-    "-c:a", "aac",
-    "-b:a", "160k",
-    "-ac", "2",
-    "-ar", "44100",
-    "-f", "flv",
-    rtmpUrl,
+    "-pix_fmt", "yuv420p", "-g", "50",
+    "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "44100",
+    "-f", "flv", rtmpUrl,
   ];
 }
 
@@ -157,138 +161,196 @@ function buildPauseArgs(rtmpUrl: string, format: StreamFormat): string[] {
     "-re",
     "-f", "lavfi", "-i", `color=c=black:s=${w}x${h}:r=30`,
     "-f", "lavfi", "-i", "aevalsrc=0:channel_layout=stereo:sample_rate=44100",
-    "-c:v", "libx264",
-    "-preset", "ultrafast",
-    "-b:v", "500k",
-    "-c:a", "aac",
-    "-b:a", "32k",
-    "-shortest",
-    "-f", "flv",
-    rtmpUrl,
+    "-c:v", "libx264", "-preset", "ultrafast", "-b:v", "500k",
+    "-c:a", "aac", "-b:a", "32k", "-shortest",
+    "-f", "flv", rtmpUrl,
   ];
 }
 
-function appendLog(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed) return;
-  state.ffmpegLog.push(trimmed);
-  if (state.ffmpegLog.length > 100) state.ffmpegLog = state.ffmpegLog.slice(-100);
-}
-
-function spawnFfmpeg(args: string[], onClose: (code: number | null) => void): ChildProcess {
+function spawnFfmpeg(s: Session, args: string[], onClose: (code: number | null) => void): ChildProcess {
   const proc = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-
   proc.stderr.on("data", (chunk: Buffer) => {
-    for (const line of chunk.toString().split("\n")) appendLog(line);
+    for (const line of chunk.toString().split("\n")) appendLog(s, line);
   });
-
   proc.on("error", (err) => {
-    state.isStreaming = false;
-    state.isPaused = false;
-    state.error = err.message === "spawn ffmpeg ENOENT"
-      ? "FFmpeg não encontrado no servidor."
-      : err.message;
-    state.process = null;
+    s.isStreaming = false; s.isPaused = false; s.process = null;
+    s.error = err.message === "spawn ffmpeg ENOENT" ? "FFmpeg não encontrado no servidor." : err.message;
   });
-
   proc.on("close", onClose);
   return proc;
 }
 
-/** Starts FFmpeg for a single video. In playlist mode, advances on code=0. */
-function startVideoProcess(
-  filePath: string,
-  rtmpUrl: string,
-  format: StreamFormat,
-  volume: number,
-  isPlaylistMode: boolean,
-) {
-  // In playlist mode each video plays once (no loop), in single mode loop forever
-  const args = buildFfmpegArgs(filePath, rtmpUrl, format, volume, !isPlaylistMode);
+function startVideoProcess(s: Session, filePath: string, rtmpUrl: string, isPlaylist: boolean) {
+  const args = buildFfmpegArgs(filePath, rtmpUrl, s.format, s.volume, !isPlaylist);
+  s.process = spawnFfmpeg(s, args, (code) => {
+    if (s.isPaused || !s.isStreaming) return;
 
-  state.process = spawnFfmpeg(args, (code) => {
-    if (state.isPaused) return;
-    if (!state.isStreaming) return;
-
-    if (isPlaylistMode && code === 0) {
-      // Advance to next in playlist
-      const nextIndex = state.playlistIndex + 1;
-      if (nextIndex < state.playlist.length) {
-        state.playlistIndex = nextIndex;
-        const nextFile = state.playlist[nextIndex]!;
-        state.videoFile = nextFile;
-        state.process = null;
-        const nextPath = path.join(UPLOADS_DIR, nextFile);
-        if (fs.existsSync(nextPath)) {
-          startVideoProcess(nextPath, rtmpUrl, format, volume, true);
-        } else {
-          state.error = `Arquivo não encontrado: ${nextFile}. Playlist interrompida.`;
-          state.isStreaming = false;
-          state.process = null;
-        }
+    if (isPlaylist && code === 0) {
+      const next = s.playlistIndex + 1 < s.playlist.length ? s.playlistIndex + 1 : 0;
+      s.playlistIndex = next;
+      s.videoFile = s.playlist[next] ?? s.videoFile;
+      s.process = null;
+      const nextPath = path.join(UPLOADS_DIR, s.videoFile ?? "");
+      if (s.videoFile && fs.existsSync(nextPath)) {
+        startVideoProcess(s, nextPath, rtmpUrl, true);
       } else {
-        // End of playlist — loop back to start
-        state.playlistIndex = 0;
-        const firstFile = state.playlist[0]!;
-        state.videoFile = firstFile;
-        state.process = null;
-        const firstPath = path.join(UPLOADS_DIR, firstFile);
-        if (fs.existsSync(firstPath)) {
-          startVideoProcess(firstPath, rtmpUrl, format, volume, true);
-        } else {
-          state.isStreaming = false;
-          state.error = "Playlist finalizada — arquivo inicial não encontrado.";
-        }
+        s.isStreaming = false;
+        s.error = `Arquivo não encontrado: ${s.videoFile}. Playlist interrompida.`;
       }
       return;
     }
 
-    // Non-zero exit or single mode finished
-    state.isStreaming = false;
-    state.process = null;
+    s.isStreaming = false; s.process = null;
     if (code !== 0) {
       const findLast = (lines: string[], pred: (l: string) => boolean): string | undefined => {
         for (let i = lines.length - 1; i >= 0; i--) if (pred(lines[i]!)) return lines[i];
         return undefined;
       };
-      const rtmpError = findLast(
-        state.ffmpegLog,
-        (l) => l.includes("rtmp") || l.includes("Connection") || l.includes("Failed") || l.includes("error") || l.includes("Error"),
+      const rtmpErr = findLast(s.ffmpegLog, (l) =>
+        l.includes("rtmp") || l.includes("Connection") || l.includes("Failed") || l.includes("error") || l.includes("Error"),
       );
-      state.error = rtmpError
-        ? `Stream key inválida ou expirada: ${rtmpError}`
+      s.error = rtmpErr
+        ? `Stream key inválida ou expirada: ${rtmpErr}`
         : `FFmpeg encerrou com código ${code}. Verifique a stream key.`;
     }
   });
 }
 
-function saveMeta(filename: string, originalName: string) {
-  const metaPath = path.join(UPLOADS_DIR, "meta.json");
-  let meta: Record<string, { originalName: string; uploadedAt: string }> = {};
-  if (fs.existsSync(metaPath)) {
-    try { meta = JSON.parse(fs.readFileSync(metaPath, "utf-8")); } catch { /* ignore */ }
-  }
-  meta[filename] = { originalName, uploadedAt: new Date().toISOString() };
-  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+function doStart(s: Session, body: { streamKey: string; videoFile: string; format?: string; volume?: number; playlist?: string[] }): string | null {
+  if (s.isStreaming) return "Já existe uma live ativa nesta sessão. Pare a atual antes de iniciar.";
+  const filePath = path.join(UPLOADS_DIR, body.videoFile);
+  if (!fs.existsSync(filePath)) return "Arquivo de vídeo não encontrado. Faça o upload primeiro.";
+
+  const fmt = (body.format === "shorts" ? "shorts" : "landscape") as StreamFormat;
+  const vol = Math.max(0, Math.min(100, Number(body.volume) || 100));
+  const playlist = Array.isArray(body.playlist) && body.playlist.length > 1 ? body.playlist : [];
+  const isPlaylist = playlist.length > 1;
+  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${body.streamKey}`;
+
+  s.isStreaming = true; s.isPaused = false;
+  s.videoFile = body.videoFile; s.streamKey = body.streamKey;
+  s.format = fmt; s.volume = vol;
+  s.startedAt = new Date().toISOString(); s.pausedAt = null; s.error = null; s.ffmpegLog = [];
+  s.loopMode = isPlaylist ? "playlist" : "single";
+  s.playlist = isPlaylist ? playlist : [];
+  s.playlistIndex = isPlaylist ? Math.max(0, playlist.indexOf(body.videoFile)) : 0;
+
+  startVideoProcess(s, filePath, rtmpUrl, isPlaylist);
+  return null;
 }
 
+function doStop(s: Session): string | null {
+  if (!s.isStreaming || !s.process) return "Nenhuma live ativa nesta sessão.";
+  const proc = s.process;
+  s.isStreaming = false; s.isPaused = false; s.process = null; s.error = null; s.pausedAt = null;
+  s.playlist = []; s.playlistIndex = 0; s.loopMode = "single";
+  killProcess(proc);
+  return null;
+}
+
+function doPause(s: Session): string | null {
+  if (!s.isStreaming || !s.process) return "Nenhuma live ativa.";
+  if (s.isPaused) return "Live já está pausada.";
+  const proc = s.process;
+  s.isPaused = true; s.pausedAt = new Date().toISOString(); s.process = null;
+  killProcess(proc);
+  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  s.process = spawnFfmpeg(s, buildPauseArgs(rtmpUrl, s.format), (code) => {
+    if (!s.isPaused) return;
+    s.isStreaming = false; s.isPaused = false; s.process = null;
+    if (code !== 0) s.error = "Conexão pausada perdida. Reinicie a live.";
+  });
+  return null;
+}
+
+function doResume(s: Session): string | null {
+  if (!s.isStreaming || !s.isPaused) return "Nenhuma live pausada.";
+  const proc = s.process;
+  s.isPaused = false; s.pausedAt = null; s.process = null;
+  if (proc) killProcess(proc);
+  const filePath = path.join(UPLOADS_DIR, s.videoFile ?? "");
+  if (!s.videoFile || !fs.existsSync(filePath)) {
+    s.isStreaming = false; s.error = "Arquivo de vídeo não encontrado. Faça upload novamente.";
+    return s.error;
+  }
+  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  startVideoProcess(s, filePath, rtmpUrl, s.loopMode === "playlist");
+  return null;
+}
+
+function doVolume(s: Session, vol: number): string | null {
+  if (!s.isStreaming) return "Nenhuma live ativa.";
+  s.volume = vol;
+  if (s.isPaused) return null;
+  const proc = s.process; s.process = null;
+  if (proc) killProcess(proc);
+  const filePath = path.join(UPLOADS_DIR, s.videoFile ?? "");
+  if (!s.videoFile || !fs.existsSync(filePath)) {
+    s.isStreaming = false; s.error = "Arquivo não encontrado.";
+    return s.error;
+  }
+  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  startVideoProcess(s, filePath, rtmpUrl, s.loopMode === "playlist");
+  return null;
+}
+
+function doSwitchVideo(s: Session, videoFile: string): string | null {
+  if (!s.isStreaming) return "Nenhuma live ativa.";
+  const filePath = path.join(UPLOADS_DIR, videoFile);
+  if (!filePath.startsWith(UPLOADS_DIR) || !fs.existsSync(filePath)) return "Arquivo não encontrado.";
+  const proc = s.process; s.process = null; s.videoFile = videoFile;
+  if (s.isPaused) {
+    if (proc) killProcess(proc);
+    const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+    s.process = spawnFfmpeg(s, buildPauseArgs(rtmpUrl, s.format), (code) => {
+      if (!s.isPaused) return;
+      s.isStreaming = false; s.isPaused = false; s.process = null;
+      if (code !== 0) s.error = "Conexão pausada perdida.";
+    });
+    return null;
+  }
+  if (proc) killProcess(proc);
+  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  startVideoProcess(s, filePath, rtmpUrl, s.loopMode === "playlist");
+  return null;
+}
+
+// ── Meta helpers ──────────────────────────────────────────────────────────────
+
 function readMeta(): Record<string, { originalName: string; uploadedAt: string }> {
-  const metaPath = path.join(UPLOADS_DIR, "meta.json");
-  if (!fs.existsSync(metaPath)) return {};
-  try { return JSON.parse(fs.readFileSync(metaPath, "utf-8")); } catch { return {}; }
+  const p = path.join(UPLOADS_DIR, "meta.json");
+  if (!fs.existsSync(p)) return {};
+  try { return JSON.parse(fs.readFileSync(p, "utf-8")); } catch { return {}; }
+}
+
+function saveMeta(filename: string, originalName: string) {
+  const p = path.join(UPLOADS_DIR, "meta.json");
+  const meta = readMeta();
+  meta[filename] = { originalName, uploadedAt: new Date().toISOString() };
+  fs.writeFileSync(p, JSON.stringify(meta, null, 2));
+}
+
+// ── yt-dlp helpers ────────────────────────────────────────────────────────────
+
+function cleanYtUrl(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    // Strip tracking-only params, keep playlist/video params
+    const keep = ["list", "v", "index"];
+    const params = new URLSearchParams();
+    for (const k of keep) { const v = u.searchParams.get(k); if (v) params.set(k, v); }
+    const qs = params.toString();
+    return `${u.origin}${u.pathname}${qs ? "?" + qs : ""}`;
+  } catch {
+    return raw.trim();
+  }
 }
 
 function ytDlpAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile("yt-dlp", ["--version"], (err) => resolve(!err));
-  });
+  return new Promise((resolve) => execFile("yt-dlp", ["--version"], { timeout: 5000 }, (err) => resolve(!err)));
 }
 
-// ── Routes ───────────────────────────────────────────────────────────────────
-
-router.get("/status", (_req, res) => {
-  res.json(getPublicState());
-});
+// ── Routes ────────────────────────────────────────────────────────────────────
 
 // ── Videos ──────────────────────────────────────────────────────────────────
 
@@ -300,12 +362,7 @@ router.get("/videos", (_req, res) => {
     .map((filename) => {
       const stat = fs.statSync(path.join(UPLOADS_DIR, filename));
       const info = meta[filename];
-      return {
-        filename,
-        originalName: info?.originalName ?? filename,
-        size: stat.size,
-        uploadedAt: info?.uploadedAt ?? stat.birthtime.toISOString(),
-      };
+      return { filename, originalName: info?.originalName ?? filename, size: stat.size, uploadedAt: info?.uploadedAt ?? stat.birthtime.toISOString() };
     });
   res.json(files);
 });
@@ -315,14 +372,12 @@ router.delete("/videos/:filename", (req, res) => {
   if (!filename || filename.includes("..") || filename.includes("/")) {
     res.status(400).json({ error: "Nome de arquivo inválido." }); return;
   }
-  if (state.isStreaming && state.videoFile === filename) {
-    res.status(409).json({ error: "Não é possível deletar o vídeo enquanto a live está ativa." }); return;
-  }
+  const inUse = Array.from(sessions.values()).some((s) => s.isStreaming && s.videoFile === filename);
+  if (inUse) { res.status(409).json({ error: "Não é possível deletar o vídeo enquanto está em uso em uma live." }); return; }
   const filePath = path.join(UPLOADS_DIR, filename);
   if (!fs.existsSync(filePath)) { res.status(404).json({ error: "Arquivo não encontrado." }); return; }
   fs.unlinkSync(filePath);
-  const meta = readMeta();
-  delete meta[filename];
+  const meta = readMeta(); delete meta[filename];
   fs.writeFileSync(path.join(UPLOADS_DIR, "meta.json"), JSON.stringify(meta, null, 2));
   res.json({ deleted: filename });
 });
@@ -336,270 +391,244 @@ router.post("/upload", (req, res) => {
   });
 });
 
-// ── Stream control ───────────────────────────────────────────────────────────
+// ── Legacy single-stream endpoints (default session) ─────────────────────────
+
+router.get("/status", (_req, res) => {
+  const s = getSession(DEFAULT_ID)!;
+  res.json(publicSession(s));
+});
 
 router.post("/start", (req, res) => {
-  if (state.isStreaming) {
-    res.status(409).json({ error: "Já existe uma live ativa. Pare a atual antes de iniciar uma nova." }); return;
-  }
+  const s = getSession(DEFAULT_ID)!;
   const parsed = StartStreamBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "streamKey e videoFile são obrigatórios." }); return; }
-
-  const { streamKey, videoFile, format = "landscape", volume = 100 } = parsed.data;
-  const playlist: string[] = Array.isArray(req.body.playlist) ? req.body.playlist : [];
-
-  const filePath = path.join(UPLOADS_DIR, videoFile);
-  if (!fs.existsSync(filePath)) {
-    res.status(400).json({ error: "Arquivo de vídeo não encontrado. Faça o upload primeiro." }); return;
-  }
-
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${streamKey}`;
-  const fmt = (format === "shorts" ? "shorts" : "landscape") as StreamFormat;
-  const vol = Math.max(0, Math.min(100, Number(volume) || 100));
-  const hasPlaylist = playlist.length > 1;
-
-  state.isStreaming = true;
-  state.isPaused = false;
-  state.videoFile = videoFile;
-  state.streamKey = streamKey;
-  state.format = fmt;
-  state.volume = vol;
-  state.startedAt = new Date().toISOString();
-  state.pausedAt = null;
-  state.error = null;
-  state.ffmpegLog = [];
-  state.loopMode = hasPlaylist ? "playlist" : "single";
-  state.playlist = hasPlaylist ? playlist : [];
-  state.playlistIndex = hasPlaylist ? playlist.indexOf(videoFile) : 0;
-  if (state.playlistIndex < 0) state.playlistIndex = 0;
-
-  startVideoProcess(filePath, rtmpUrl, fmt, vol, hasPlaylist);
-  res.json(getPublicState());
+  const err = doStart(s, { ...parsed.data, playlist: req.body.playlist });
+  if (err) { res.status(409).json({ error: err }); return; }
+  res.json(publicSession(s));
 });
 
 router.post("/stop", (_req, res) => {
-  if (!state.isStreaming || !state.process) {
-    res.status(404).json({ error: "Nenhuma live ativa no momento." }); return;
-  }
-  const proc = state.process;
-  state.isStreaming = false;
-  state.isPaused = false;
-  state.process = null;
-  state.error = null;
-  state.pausedAt = null;
-  state.playlist = [];
-  state.playlistIndex = 0;
-  state.loopMode = "single";
-  killProcess(proc);
-  res.json(getPublicState());
+  const s = getSession(DEFAULT_ID)!;
+  const err = doStop(s);
+  if (err) { res.status(404).json({ error: err }); return; }
+  res.json(publicSession(s));
 });
 
 router.post("/pause", (_req, res) => {
-  if (!state.isStreaming || !state.process) {
-    res.status(404).json({ error: "Nenhuma live ativa." }); return;
-  }
-  if (state.isPaused) {
-    res.status(409).json({ error: "Live já está pausada." }); return;
-  }
-
-  const proc = state.process;
-  state.isPaused = true;
-  state.pausedAt = new Date().toISOString();
-  state.process = null;
-
-  killProcess(proc);
-
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${state.streamKey}`;
-  state.process = spawnFfmpeg(buildPauseArgs(rtmpUrl, state.format), (code) => {
-    if (!state.isPaused) return;
-    state.isStreaming = false;
-    state.isPaused = false;
-    state.process = null;
-    if (code !== 0) state.error = "Conexão pausada perdida. Reinicie a live.";
-  });
-
-  res.json(getPublicState());
+  const s = getSession(DEFAULT_ID)!;
+  const err = doPause(s);
+  if (err) { res.status(err.includes("já está") ? 409 : 404).json({ error: err }); return; }
+  res.json(publicSession(s));
 });
 
 router.post("/resume", (_req, res) => {
-  if (!state.isStreaming || !state.isPaused) {
-    res.status(404).json({ error: "Nenhuma live pausada para retomar." }); return;
-  }
-
-  const proc = state.process;
-  state.isPaused = false;
-  state.pausedAt = null;
-  state.process = null;
-
-  if (proc) killProcess(proc);
-
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${state.streamKey}`;
-  const filePath = path.join(UPLOADS_DIR, state.videoFile!);
-
-  if (!fs.existsSync(filePath)) {
-    state.isStreaming = false;
-    state.error = "Arquivo de vídeo não encontrado. Faça upload novamente.";
-    res.status(400).json({ error: state.error }); return;
-  }
-
-  startVideoProcess(filePath, rtmpUrl, state.format, state.volume, state.loopMode === "playlist");
-  res.json(getPublicState());
+  const s = getSession(DEFAULT_ID)!;
+  const err = doResume(s);
+  if (err) { res.status(400).json({ error: err }); return; }
+  res.json(publicSession(s));
 });
 
 router.post("/volume", (req, res) => {
-  if (!state.isStreaming) {
-    res.status(404).json({ error: "Nenhuma live ativa." }); return;
+  const s = getSession(DEFAULT_ID)!;
+  const vol = Number(req.body?.volume);
+  if (!Number.isInteger(vol) || vol < 0 || vol > 100) {
+    res.status(400).json({ error: "Volume deve ser 0-100." }); return;
   }
-  const rawVol = Number(req.body?.volume);
-  if (!Number.isInteger(rawVol) || rawVol < 0 || rawVol > 100) {
-    res.status(400).json({ error: "Volume deve ser um número inteiro entre 0 e 100." }); return;
-  }
-  state.volume = rawVol;
-
-  if (state.isPaused) { res.json(getPublicState()); return; }
-
-  const proc = state.process;
-  state.process = null;
-  if (proc) killProcess(proc);
-
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${state.streamKey}`;
-  const filePath = path.join(UPLOADS_DIR, state.videoFile!);
-
-  if (!fs.existsSync(filePath)) {
-    state.isStreaming = false;
-    state.error = "Arquivo de vídeo não encontrado.";
-    res.status(400).json({ error: state.error }); return;
-  }
-
-  startVideoProcess(filePath, rtmpUrl, state.format, rawVol, state.loopMode === "playlist");
-  res.json(getPublicState());
+  const err = doVolume(s, vol);
+  if (err) { res.status(404).json({ error: err }); return; }
+  res.json(publicSession(s));
 });
-
-// ── Switch video mid-stream ───────────────────────────────────────────────────
 
 router.post("/switch-video", (req, res) => {
-  if (!state.isStreaming) {
-    res.status(404).json({ error: "Nenhuma live ativa." }); return;
-  }
+  const s = getSession(DEFAULT_ID)!;
   const { videoFile } = req.body as { videoFile?: string };
-  if (!videoFile || typeof videoFile !== "string") {
-    res.status(400).json({ error: "videoFile é obrigatório." }); return;
-  }
-  const filePath = path.join(UPLOADS_DIR, videoFile);
-  if (!filePath.startsWith(UPLOADS_DIR) || !fs.existsSync(filePath)) {
-    res.status(400).json({ error: "Arquivo não encontrado. Faça o upload primeiro." }); return;
-  }
-
-  const proc = state.process;
-  state.process = null;
-  state.videoFile = videoFile;
-
-  if (state.isPaused) {
-    // Just update the video reference; it'll apply on resume
-    if (proc) killProcess(proc);
-    const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${state.streamKey}`;
-    state.process = spawnFfmpeg(buildPauseArgs(rtmpUrl, state.format), (code) => {
-      if (!state.isPaused) return;
-      state.isStreaming = false;
-      state.isPaused = false;
-      state.process = null;
-      if (code !== 0) state.error = "Conexão pausada perdida. Reinicie a live.";
-    });
-    res.json(getPublicState()); return;
-  }
-
-  if (proc) killProcess(proc);
-
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${state.streamKey}`;
-  startVideoProcess(filePath, rtmpUrl, state.format, state.volume, state.loopMode === "playlist");
-  res.json(getPublicState());
+  if (!videoFile) { res.status(400).json({ error: "videoFile é obrigatório." }); return; }
+  const err = doSwitchVideo(s, videoFile);
+  if (err) { res.status(400).json({ error: err }); return; }
+  res.json(publicSession(s));
 });
-
-// ── Playlist ──────────────────────────────────────────────────────────────────
 
 router.post("/playlist", (req, res) => {
+  const s = getSession(DEFAULT_ID)!;
   const { playlist } = req.body as { playlist?: string[] };
-  if (!Array.isArray(playlist)) {
-    res.status(400).json({ error: "playlist deve ser um array de filenames." }); return;
+  if (!Array.isArray(playlist)) { res.status(400).json({ error: "playlist deve ser um array." }); return; }
+  s.playlist = playlist;
+  s.loopMode = playlist.length > 1 ? "playlist" : "single";
+  if (s.isStreaming && s.videoFile) {
+    const idx = playlist.indexOf(s.videoFile);
+    s.playlistIndex = idx >= 0 ? idx : 0;
   }
-
-  state.playlist = playlist;
-  state.loopMode = playlist.length > 1 ? "playlist" : "single";
-
-  // If already streaming, update the index to keep current video position
-  if (state.isStreaming && state.videoFile) {
-    const idx = playlist.indexOf(state.videoFile);
-    state.playlistIndex = idx >= 0 ? idx : 0;
-  }
-
-  res.json(getPublicState());
+  res.json(publicSession(s));
 });
 
-// ── YouTube import (yt-dlp) ───────────────────────────────────────────────────
+// ── Multi-session endpoints ───────────────────────────────────────────────────
+
+router.get("/sessions", (_req, res) => {
+  res.json(Array.from(sessions.values()).map(publicSession));
+});
+
+router.post("/sessions", (req, res) => {
+  const { name } = req.body as { name?: string };
+  if (!name || typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ error: "name é obrigatório." }); return;
+  }
+  const id = crypto.randomUUID();
+  const s = createSession(id, name.trim().slice(0, 60));
+  res.json(publicSession(s));
+});
+
+router.get("/sessions/:sessionId", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  res.json(publicSession(s));
+});
+
+router.delete("/sessions/:sessionId", (req, res) => {
+  const { sessionId } = req.params;
+  if (sessionId === DEFAULT_ID) { res.status(409).json({ error: "A sessão principal não pode ser deletada." }); return; }
+  const s = getSession(sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  if (s.isStreaming) { res.status(409).json({ error: "Pare a live antes de deletar a sessão." }); return; }
+  if (s.process) killProcess(s.process);
+  sessions.delete(sessionId);
+  res.json({ deleted: sessionId });
+});
+
+router.patch("/sessions/:sessionId", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const { name } = req.body as { name?: string };
+  if (!name || !name.trim()) { res.status(400).json({ error: "name é obrigatório." }); return; }
+  s.name = name.trim().slice(0, 60);
+  res.json(publicSession(s));
+});
+
+router.post("/sessions/:sessionId/start", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const parsed = StartStreamBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "streamKey e videoFile são obrigatórios." }); return; }
+  const err = doStart(s, { ...parsed.data, playlist: req.body.playlist });
+  if (err) { res.status(err.includes("Já existe") ? 409 : 400).json({ error: err }); return; }
+  res.json(publicSession(s));
+});
+
+router.post("/sessions/:sessionId/stop", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const err = doStop(s);
+  if (err) { res.status(404).json({ error: err }); return; }
+  res.json(publicSession(s));
+});
+
+router.post("/sessions/:sessionId/pause", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const err = doPause(s);
+  if (err) { res.status(err.includes("já está") ? 409 : 404).json({ error: err }); return; }
+  res.json(publicSession(s));
+});
+
+router.post("/sessions/:sessionId/resume", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const err = doResume(s);
+  if (err) { res.status(400).json({ error: err }); return; }
+  res.json(publicSession(s));
+});
+
+router.post("/sessions/:sessionId/volume", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const vol = Number(req.body?.volume);
+  if (!Number.isInteger(vol) || vol < 0 || vol > 100) {
+    res.status(400).json({ error: "Volume deve ser 0-100." }); return;
+  }
+  const err = doVolume(s, vol);
+  if (err) { res.status(404).json({ error: err }); return; }
+  res.json(publicSession(s));
+});
+
+router.post("/sessions/:sessionId/switch-video", (req, res) => {
+  const s = getSession(req.params.sessionId);
+  if (!s) { res.status(404).json({ error: "Sessão não encontrada." }); return; }
+  const { videoFile } = req.body as { videoFile?: string };
+  if (!videoFile) { res.status(400).json({ error: "videoFile é obrigatório." }); return; }
+  const err = doSwitchVideo(s, videoFile);
+  if (err) { res.status(400).json({ error: err }); return; }
+  res.json(publicSession(s));
+});
+
+// ── Import (yt-dlp) ───────────────────────────────────────────────────────────
 
 router.post("/import/list", async (req, res) => {
-  const available = await ytDlpAvailable();
-  if (!available) {
-    res.status(503).json({ error: "yt-dlp não está disponível neste servidor." }); return;
+  if (!await ytDlpAvailable()) {
+    res.status(503).json({ error: "yt-dlp não está disponível neste servidor. Aguarde o Railway recompilar o backend com a nova versão do Dockerfile." }); return;
   }
 
-  const { url } = req.body as { url?: string };
-  if (!url || typeof url !== "string") {
-    res.status(400).json({ error: "url é obrigatório." }); return;
-  }
-
-  // Validate it's a YouTube URL
+  const { url, limit = 20, sort = "newest" } = req.body as { url?: string; limit?: number; sort?: string };
+  if (!url) { res.status(400).json({ error: "url é obrigatório." }); return; }
   if (!url.includes("youtube.com") && !url.includes("youtu.be")) {
     res.status(400).json({ error: "Use uma URL do YouTube (canal, playlist ou vídeo)." }); return;
   }
 
-  execFile(
-    "yt-dlp",
-    [
-      "--flat-playlist",
-      "--print", "%(id)s\t%(title)s\t%(duration)s\t%(thumbnail)s\t%(webpage_url)s",
-      "--playlist-end", "50", // max 50 videos
-      "--no-warnings",
-      url,
-    ],
-    { timeout: 30000 },
-    (err, stdout, stderr) => {
-      if (err) {
-        const msg = stderr?.trim() || err.message;
-        res.status(400).json({ error: `Falha ao listar vídeos: ${msg.slice(0, 200)}` }); return;
-      }
+  const cleanUrl = cleanYtUrl(url);
+  const clampedLimit = Math.max(1, Math.min(50, Number(limit) || 20));
 
-      const videos = stdout
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          const [id, title, duration, thumbnail, videoUrl] = line.split("\t");
+  const args = [
+    "--flat-playlist",
+    "--dump-single-json",
+    "--no-warnings",
+    "--playlist-end", String(clampedLimit),
+    ...(sort === "oldest" ? ["--playlist-reverse"] : []),
+    cleanUrl,
+  ];
+
+  execFile("yt-dlp", args, { timeout: 45000 }, (err, stdout, stderr) => {
+    if (err) {
+      const msg = (stderr || err.message).trim();
+      // Extract most useful part of error
+      const lines = msg.split("\n").filter((l) => l.includes("ERROR") || l.includes("error") || l.includes("Unable") || l.includes("not found"));
+      const friendly = lines[0] ?? msg.slice(0, 300);
+      res.status(400).json({ error: `Não foi possível acessar este canal/playlist: ${friendly}` }); return;
+    }
+
+    try {
+      const data = JSON.parse(stdout.trim());
+      const entries = Array.isArray(data.entries) ? data.entries : (data.id ? [data] : []);
+      const channelName: string | null = data.channel ?? data.uploader ?? data.title ?? null;
+
+      const videos = entries
+        .filter((e: Record<string, unknown>) => e.id)
+        .map((e: Record<string, unknown>) => {
+          const thumbnails = Array.isArray(e.thumbnails) ? e.thumbnails : [];
+          const thumb = thumbnails.length > 0 ? (thumbnails[thumbnails.length - 1] as { url?: string })?.url : null;
+          const videoUrl = typeof e.url === "string" ? e.url
+            : typeof e.webpage_url === "string" ? e.webpage_url
+            : `https://www.youtube.com/watch?v=${e.id}`;
           return {
-            id: id ?? "",
-            title: title ?? "(sem título)",
-            duration: duration && duration !== "NA" ? Number(duration) : null,
-            thumbnail: thumbnail && thumbnail !== "NA" ? thumbnail : null,
-            url: videoUrl ?? `https://www.youtube.com/watch?v=${id}`,
+            id: String(e.id),
+            title: typeof e.title === "string" ? e.title : "(sem título)",
+            duration: typeof e.duration === "number" ? e.duration : null,
+            thumbnail: thumb ?? null,
+            url: videoUrl,
           };
-        })
-        .filter((v) => v.id);
+        });
 
-      res.json({ videos });
-    },
-  );
+      res.json({ videos, channelName });
+    } catch (parseErr) {
+      res.status(400).json({ error: "Não foi possível interpretar a resposta do yt-dlp. Tente outra URL." });
+    }
+  });
 });
 
 router.post("/import/download", async (req, res) => {
-  const available = await ytDlpAvailable();
-  if (!available) {
+  if (!await ytDlpAvailable()) {
     res.status(503).json({ error: "yt-dlp não está disponível neste servidor." }); return;
   }
 
   const { url, title } = req.body as { url?: string; title?: string };
-  if (!url || typeof url !== "string") {
-    res.status(400).json({ error: "url é obrigatório." }); return;
-  }
+  if (!url) { res.status(400).json({ error: "url é obrigatório." }); return; }
   if (!url.includes("youtube.com") && !url.includes("youtu.be")) {
     res.status(400).json({ error: "Use uma URL do YouTube." }); return;
   }
@@ -608,14 +637,7 @@ router.post("/import/download", async (req, res) => {
   const safeTitle = (title ?? "video").replace(/[^a-z0-9]/gi, "_").slice(0, 60);
   const outputTemplate = path.join(UPLOADS_DIR, `${safeTitle}_${Date.now()}.%(ext)s`);
 
-  const job: DownloadJob = {
-    jobId,
-    status: "downloading",
-    percent: 0,
-    filename: null,
-    error: null,
-    title: title ?? "Vídeo",
-  };
+  const job: DownloadJob = { jobId, status: "downloading", percent: 0, filename: null, error: null, title: title ?? "Vídeo" };
   downloadJobs.set(jobId, job);
 
   const proc = spawn("yt-dlp", [
@@ -624,55 +646,33 @@ router.post("/import/download", async (req, res) => {
     "--output", outputTemplate,
     "--no-playlist",
     "--newline",
-    url,
+    cleanYtUrl(url),
   ]);
 
-  proc.stdout.on("data", (chunk: Buffer) => {
-    const text = chunk.toString();
-    // Parse progress lines like: [download]  42.3% of ...
-    const match = text.match(/\[download\]\s+([\d.]+)%/);
-    if (match) {
-      job.percent = parseFloat(match[1]!);
-    }
-    // Detect final filename
-    const destMatch = text.match(/\[(?:download|Merger)\] Destination:\s*(.+)/);
-    if (destMatch) {
-      job.filename = path.basename(destMatch[1]!.trim());
-    }
-  });
+  const parseProgress = (text: string) => {
+    const m = text.match(/\[download\]\s+([\d.]+)%/);
+    if (m) job.percent = parseFloat(m[1]!);
+    const dest = text.match(/\[(?:download|Merger|ExtractAudio)\] Destination:\s*(.+)/);
+    if (dest) job.filename = path.basename(dest[1]!.trim());
+  };
 
-  proc.stderr.on("data", (chunk: Buffer) => {
-    const text = chunk.toString();
-    const match = text.match(/\[download\]\s+([\d.]+)%/);
-    if (match) job.percent = parseFloat(match[1]!);
-  });
+  proc.stdout.on("data", (c: Buffer) => parseProgress(c.toString()));
+  proc.stderr.on("data", (c: Buffer) => parseProgress(c.toString()));
 
   proc.on("close", (code) => {
     if (code === 0) {
-      job.status = "done";
-      job.percent = 100;
-
-      // Try to find the actual output file if we lost the filename
+      job.status = "done"; job.percent = 100;
       if (!job.filename) {
-        const prefix = path.basename(outputTemplate.replace(".%(ext)s", ""));
-        const files = fs.readdirSync(UPLOADS_DIR).filter((f) => f.startsWith(prefix.split("_").slice(0, -1).join("_")));
-        if (files.length > 0) job.filename = files[files.length - 1]!;
+        const prefix = path.basename(outputTemplate).replace(".%(ext)s", "");
+        const found = fs.readdirSync(UPLOADS_DIR).find((f) => f.startsWith(prefix.split("_").slice(0, -1).join("_")));
+        if (found) job.filename = found;
       }
-
-      // Save metadata
-      if (job.filename) {
-        saveMeta(job.filename, title ?? job.filename);
-      }
+      if (job.filename) saveMeta(job.filename, title ?? job.filename);
     } else {
-      job.status = "error";
-      job.error = `yt-dlp encerrou com código ${code}`;
+      job.status = "error"; job.error = `yt-dlp encerrou com código ${code}`;
     }
   });
-
-  proc.on("error", (err) => {
-    job.status = "error";
-    job.error = err.message;
-  });
+  proc.on("error", (err) => { job.status = "error"; job.error = err.message; });
 
   res.json({ jobId, title: job.title });
 });
@@ -680,13 +680,7 @@ router.post("/import/download", async (req, res) => {
 router.get("/import/progress/:jobId", (req, res) => {
   const job = downloadJobs.get(req.params.jobId);
   if (!job) { res.status(404).json({ error: "Job não encontrado." }); return; }
-  res.json({
-    jobId: job.jobId,
-    status: job.status,
-    percent: job.percent,
-    filename: job.filename,
-    error: job.error,
-  });
+  res.json({ jobId: job.jobId, status: job.status, percent: job.percent, filename: job.filename, error: job.error });
 });
 
 export default router;
