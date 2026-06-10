@@ -17,9 +17,11 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * @summary Get current stream status
+ * @summary Get default session status
  */
 export const GetStreamStatusResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -31,12 +33,13 @@ export const GetStreamStatusResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Start streaming a video to YouTube Live in a loop
+ * @summary Start streaming (default session)
  */
 
 
@@ -56,6 +59,8 @@ export const StartStreamBody = zod.object({
 })
 
 export const StartStreamResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -67,14 +72,17 @@ export const StartStreamResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Stop the current live stream
+ * @summary Stop streaming (default session)
  */
 export const StopStreamResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -86,14 +94,17 @@ export const StopStreamResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Pause stream (switches to black frame + silence, keeps RTMP alive)
+ * @summary Pause (default session)
  */
 export const PauseStreamResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -105,14 +116,17 @@ export const PauseStreamResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Resume stream after pause
+ * @summary Resume (default session)
  */
 export const ResumeStreamResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -124,12 +138,13 @@ export const ResumeStreamResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Change volume of running stream (restarts FFmpeg with new volume)
+ * @summary Set volume (default session)
  */
 export const setVolumeBodyVolumeMin = 0;
 export const setVolumeBodyVolumeMax = 100;
@@ -141,6 +156,8 @@ export const SetVolumeBody = zod.object({
 })
 
 export const SetVolumeResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -152,12 +169,13 @@ export const SetVolumeResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Switch to a different video without stopping the live stream
+ * @summary Switch video mid-stream (default session)
  */
 
 
@@ -167,6 +185,8 @@ export const SwitchVideoBody = zod.object({
 })
 
 export const SwitchVideoResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -178,18 +198,21 @@ export const SwitchVideoResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
 /**
- * @summary Set the playlist queue (ordered list of video filenames)
+ * @summary Update playlist (default session)
  */
 export const UpdatePlaylistBody = zod.object({
   "playlist": zod.array(zod.string())
 })
 
 export const UpdatePlaylistResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
   "isStreaming": zod.boolean(),
   "isPaused": zod.boolean(),
   "videoFile": zod.string().nullable(),
@@ -201,7 +224,8 @@ export const UpdatePlaylistResponse = zod.object({
   "error": zod.string().nullable(),
   "playlist": zod.array(zod.string()),
   "playlistIndex": zod.number(),
-  "loopMode": zod.enum(['single', 'playlist'])
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
 })
 
 
@@ -230,13 +254,327 @@ export const DeleteVideoResponse = zod.object({
 
 
 /**
- * @summary List videos from a public YouTube channel or playlist URL
+ * @summary List all live sessions
+ */
+export const ListSessionsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+export const ListSessionsResponse = zod.array(ListSessionsResponseItem)
+
+
+/**
+ * @summary Create a new live session
+ */
+export const CreateSessionBody = zod.object({
+  "name": zod.string()
+})
+
+export const CreateSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Get a specific session's status
+ */
+export const GetSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const GetSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a session (must be stopped)
+ */
+export const DeleteSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const DeleteSessionResponse = zod.object({
+  "deleted": zod.string()
+})
+
+
+/**
+ * @summary Rename a session
+ */
+export const RenameSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+
+
+
+export const RenameSessionBody = zod.object({
+  "name": zod.string().min(1)
+})
+
+export const RenameSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Start streaming in a specific session
+ */
+export const StartSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+
+
+export const startSessionBodyFormatDefault = `landscape`;
+export const startSessionBodyVolumeDefault = 100;
+export const startSessionBodyVolumeMin = 0;
+export const startSessionBodyVolumeMax = 100;
+
+export const startSessionBodyPlaylistDefault = [];
+
+export const StartSessionBody = zod.object({
+  "streamKey": zod.string().min(1),
+  "videoFile": zod.string().min(1),
+  "format": zod.enum(['landscape', 'shorts']).default(startSessionBodyFormatDefault),
+  "volume": zod.number().min(startSessionBodyVolumeMin).max(startSessionBodyVolumeMax).default(startSessionBodyVolumeDefault),
+  "playlist": zod.array(zod.string()).default(startSessionBodyPlaylistDefault)
+})
+
+export const StartSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Stop a specific session
+ */
+export const StopSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const StopSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Pause a specific session
+ */
+export const PauseSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const PauseSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Resume a specific session
+ */
+export const ResumeSessionParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const ResumeSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Set volume for a specific session
+ */
+export const SetSessionVolumeParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const setSessionVolumeBodyVolumeMin = 0;
+export const setSessionVolumeBodyVolumeMax = 100;
+
+
+
+export const SetSessionVolumeBody = zod.object({
+  "volume": zod.number().min(setSessionVolumeBodyVolumeMin).max(setSessionVolumeBodyVolumeMax)
+})
+
+export const SetSessionVolumeResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Switch video for a specific session
+ */
+export const SwitchSessionVideoParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+
+
+
+export const SwitchSessionVideoBody = zod.object({
+  "videoFile": zod.string().min(1)
+})
+
+export const SwitchSessionVideoResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "isStreaming": zod.boolean(),
+  "isPaused": zod.boolean(),
+  "videoFile": zod.string().nullable(),
+  "streamKey": zod.string().nullable(),
+  "format": zod.string().nullable(),
+  "volume": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "pausedAt": zod.string().nullable(),
+  "error": zod.string().nullable(),
+  "playlist": zod.array(zod.string()),
+  "playlistIndex": zod.number(),
+  "loopMode": zod.enum(['single', 'playlist']),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary List videos from a public YouTube channel/playlist (yt-dlp)
  */
 
+export const importChannelListBodyLimitDefault = 20;
+export const importChannelListBodyLimitMax = 50;
 
+export const importChannelListBodySortDefault = `newest`;
 
 export const ImportChannelListBody = zod.object({
-  "url": zod.string().min(1)
+  "url": zod.string().min(1),
+  "limit": zod.number().min(1).max(importChannelListBodyLimitMax).default(importChannelListBodyLimitDefault),
+  "sort": zod.enum(['newest', 'oldest']).default(importChannelListBodySortDefault)
 })
 
 export const ImportChannelListResponse = zod.object({
@@ -246,12 +584,13 @@ export const ImportChannelListResponse = zod.object({
   "duration": zod.number().nullish(),
   "thumbnail": zod.string().nullish(),
   "url": zod.string()
-}))
+})),
+  "channelName": zod.string().nullish()
 })
 
 
 /**
- * @summary Start downloading a YouTube video into the uploads folder
+ * @summary Start downloading a YouTube video
  */
 
 
@@ -268,7 +607,7 @@ export const ImportDownloadResponse = zod.object({
 
 
 /**
- * @summary Get download progress for a specific job
+ * @summary Get download progress
  */
 export const ImportProgressParams = zod.object({
   "jobId": zod.coerce.string()
