@@ -20,6 +20,8 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CreateSessionInput,
+  DeleteSession200,
   DeleteVideo200,
   ErrorResponse,
   HealthStatus,
@@ -29,8 +31,9 @@ import type {
   ImportListResult,
   ImportProgressResult,
   PlaylistInput,
+  RenameSessionInput,
+  SessionState,
   StreamInput,
-  StreamStatus,
   SwitchVideoInput,
   VideoFile,
   VolumeInput
@@ -134,11 +137,11 @@ export const getGetStreamStatusUrl = () => {
 }
 
 /**
- * @summary Get current stream status
+ * @summary Get default session status
  */
-export const getStreamStatus = async ( options?: RequestInit): Promise<StreamStatus> => {
+export const getStreamStatus = async ( options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getGetStreamStatusUrl(),
+  return customFetch<SessionState>(getGetStreamStatusUrl(),
   {
     ...options,
     method: 'GET'
@@ -181,7 +184,7 @@ export type GetStreamStatusQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Get current stream status
+ * @summary Get default session status
  */
 
 export function useGetStreamStatus<TData = Awaited<ReturnType<typeof getStreamStatus>>, TError = ErrorType<unknown>>(
@@ -211,11 +214,11 @@ export const getStartStreamUrl = () => {
 }
 
 /**
- * @summary Start streaming a video to YouTube Live in a loop
+ * @summary Start streaming (default session)
  */
-export const startStream = async (streamInput: StreamInput, options?: RequestInit): Promise<StreamStatus> => {
+export const startStream = async (streamInput: StreamInput, options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getStartStreamUrl(),
+  return customFetch<SessionState>(getStartStreamUrl(),
   {
     ...options,
     method: 'POST',
@@ -260,7 +263,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type StartStreamMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Start streaming a video to YouTube Live in a loop
+ * @summary Start streaming (default session)
  */
 export const useStartStream = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startStream>>, TError,{data: BodyType<StreamInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -282,11 +285,11 @@ export const getStopStreamUrl = () => {
 }
 
 /**
- * @summary Stop the current live stream
+ * @summary Stop streaming (default session)
  */
-export const stopStream = async ( options?: RequestInit): Promise<StreamStatus> => {
+export const stopStream = async ( options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getStopStreamUrl(),
+  return customFetch<SessionState>(getStopStreamUrl(),
   {
     ...options,
     method: 'POST'
@@ -330,7 +333,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type StopStreamMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Stop the current live stream
+ * @summary Stop streaming (default session)
  */
 export const useStopStream = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -352,11 +355,11 @@ export const getPauseStreamUrl = () => {
 }
 
 /**
- * @summary Pause stream (switches to black frame + silence, keeps RTMP alive)
+ * @summary Pause (default session)
  */
-export const pauseStream = async ( options?: RequestInit): Promise<StreamStatus> => {
+export const pauseStream = async ( options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getPauseStreamUrl(),
+  return customFetch<SessionState>(getPauseStreamUrl(),
   {
     ...options,
     method: 'POST'
@@ -400,7 +403,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PauseStreamMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Pause stream (switches to black frame + silence, keeps RTMP alive)
+ * @summary Pause (default session)
  */
 export const usePauseStream = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -422,11 +425,11 @@ export const getResumeStreamUrl = () => {
 }
 
 /**
- * @summary Resume stream after pause
+ * @summary Resume (default session)
  */
-export const resumeStream = async ( options?: RequestInit): Promise<StreamStatus> => {
+export const resumeStream = async ( options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getResumeStreamUrl(),
+  return customFetch<SessionState>(getResumeStreamUrl(),
   {
     ...options,
     method: 'POST'
@@ -470,7 +473,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResumeStreamMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Resume stream after pause
+ * @summary Resume (default session)
  */
 export const useResumeStream = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeStream>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -492,11 +495,11 @@ export const getSetVolumeUrl = () => {
 }
 
 /**
- * @summary Change volume of running stream (restarts FFmpeg with new volume)
+ * @summary Set volume (default session)
  */
-export const setVolume = async (volumeInput: VolumeInput, options?: RequestInit): Promise<StreamStatus> => {
+export const setVolume = async (volumeInput: VolumeInput, options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getSetVolumeUrl(),
+  return customFetch<SessionState>(getSetVolumeUrl(),
   {
     ...options,
     method: 'POST',
@@ -541,7 +544,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetVolumeMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Change volume of running stream (restarts FFmpeg with new volume)
+ * @summary Set volume (default session)
  */
 export const useSetVolume = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVolume>>, TError,{data: BodyType<VolumeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -563,11 +566,11 @@ export const getSwitchVideoUrl = () => {
 }
 
 /**
- * @summary Switch to a different video without stopping the live stream
+ * @summary Switch video mid-stream (default session)
  */
-export const switchVideo = async (switchVideoInput: SwitchVideoInput, options?: RequestInit): Promise<StreamStatus> => {
+export const switchVideo = async (switchVideoInput: SwitchVideoInput, options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getSwitchVideoUrl(),
+  return customFetch<SessionState>(getSwitchVideoUrl(),
   {
     ...options,
     method: 'POST',
@@ -612,7 +615,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SwitchVideoMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Switch to a different video without stopping the live stream
+ * @summary Switch video mid-stream (default session)
  */
 export const useSwitchVideo = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchVideo>>, TError,{data: BodyType<SwitchVideoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -634,11 +637,11 @@ export const getUpdatePlaylistUrl = () => {
 }
 
 /**
- * @summary Set the playlist queue (ordered list of video filenames)
+ * @summary Update playlist (default session)
  */
-export const updatePlaylist = async (playlistInput: PlaylistInput, options?: RequestInit): Promise<StreamStatus> => {
+export const updatePlaylist = async (playlistInput: PlaylistInput, options?: RequestInit): Promise<SessionState> => {
 
-  return customFetch<StreamStatus>(getUpdatePlaylistUrl(),
+  return customFetch<SessionState>(getUpdatePlaylistUrl(),
   {
     ...options,
     method: 'POST',
@@ -683,7 +686,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdatePlaylistMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Set the playlist queue (ordered list of video filenames)
+ * @summary Update playlist (default session)
  */
 export const useUpdatePlaylist = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlaylist>>, TError,{data: BodyType<PlaylistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -843,6 +846,799 @@ export const useDeleteVideo = <TError = ErrorType<ErrorResponse>,
       return useMutation(getDeleteVideoMutationOptions(options));
     }
 
+export const getListSessionsUrl = () => {
+
+
+
+
+  return `/api/stream/sessions`
+}
+
+/**
+ * @summary List all live sessions
+ */
+export const listSessions = async ( options?: RequestInit): Promise<SessionState[]> => {
+
+  return customFetch<SessionState[]>(getListSessionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSessionsQueryKey = () => {
+    return [
+    `/api/stream/sessions`
+    ] as const;
+    }
+
+
+export const getListSessionsQueryOptions = <TData = Awaited<ReturnType<typeof listSessions>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSessionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSessions>>> = ({ signal }) => listSessions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSessionsQueryResult = NonNullable<Awaited<ReturnType<typeof listSessions>>>
+export type ListSessionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all live sessions
+ */
+
+export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSessionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateSessionUrl = () => {
+
+
+
+
+  return `/api/stream/sessions`
+}
+
+/**
+ * @summary Create a new live session
+ */
+export const createSession = async (createSessionInput: CreateSessionInput, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getCreateSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createSessionInput,)
+  }
+);}
+
+
+
+
+export const getCreateSessionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,{data: BodyType<CreateSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,{data: BodyType<CreateSessionInput>}, TContext> => {
+
+const mutationKey = ['createSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSession>>, {data: BodyType<CreateSessionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createSession>>>
+    export type CreateSessionMutationBody = BodyType<CreateSessionInput>
+    export type CreateSessionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a new live session
+ */
+export const useCreateSession = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,{data: BodyType<CreateSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSession>>,
+        TError,
+        {data: BodyType<CreateSessionInput>},
+        TContext
+      > => {
+      return useMutation(getCreateSessionMutationOptions(options));
+    }
+
+export const getGetSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}`
+}
+
+/**
+ * @summary Get a specific session's status
+ */
+export const getSession = async (sessionId: string, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getGetSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSessionQueryKey = (sessionId: string,) => {
+    return [
+    `/api/stream/sessions/${sessionId}`
+    ] as const;
+    }
+
+
+export const getGetSessionQueryOptions = <TData = Awaited<ReturnType<typeof getSession>>, TError = ErrorType<ErrorResponse>>(sessionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSessionQueryKey(sessionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSession>>> = ({ signal }) => getSession(sessionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(sessionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getSession>>>
+export type GetSessionQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get a specific session's status
+ */
+
+export function useGetSession<TData = Awaited<ReturnType<typeof getSession>>, TError = ErrorType<ErrorResponse>>(
+ sessionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSessionQueryOptions(sessionId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getDeleteSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}`
+}
+
+/**
+ * @summary Delete a session (must be stopped)
+ */
+export const deleteSession = async (sessionId: string, options?: RequestInit): Promise<DeleteSession200> => {
+
+  return customFetch<DeleteSession200>(getDeleteSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteSessionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSession>>, TError,{sessionId: string}, TContext> => {
+
+const mutationKey = ['deleteSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSession>>, {sessionId: string}> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  deleteSession(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSessionMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSession>>>
+
+    export type DeleteSessionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a session (must be stopped)
+ */
+export const useDeleteSession = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSession>>,
+        TError,
+        {sessionId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteSessionMutationOptions(options));
+    }
+
+export const getRenameSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}`
+}
+
+/**
+ * @summary Rename a session
+ */
+export const renameSession = async (sessionId: string,
+    renameSessionInput: RenameSessionInput, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getRenameSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      renameSessionInput,)
+  }
+);}
+
+
+
+
+export const getRenameSessionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameSession>>, TError,{sessionId: string;data: BodyType<RenameSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameSession>>, TError,{sessionId: string;data: BodyType<RenameSessionInput>}, TContext> => {
+
+const mutationKey = ['renameSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameSession>>, {sessionId: string;data: BodyType<RenameSessionInput>}> = (props) => {
+          const {sessionId,data} = props ?? {};
+
+          return  renameSession(sessionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameSessionMutationResult = NonNullable<Awaited<ReturnType<typeof renameSession>>>
+    export type RenameSessionMutationBody = BodyType<RenameSessionInput>
+    export type RenameSessionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Rename a session
+ */
+export const useRenameSession = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameSession>>, TError,{sessionId: string;data: BodyType<RenameSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renameSession>>,
+        TError,
+        {sessionId: string;data: BodyType<RenameSessionInput>},
+        TContext
+      > => {
+      return useMutation(getRenameSessionMutationOptions(options));
+    }
+
+export const getStartSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}/start`
+}
+
+/**
+ * @summary Start streaming in a specific session
+ */
+export const startSession = async (sessionId: string,
+    streamInput: StreamInput, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getStartSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      streamInput,)
+  }
+);}
+
+
+
+
+export const getStartSessionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startSession>>, TError,{sessionId: string;data: BodyType<StreamInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startSession>>, TError,{sessionId: string;data: BodyType<StreamInput>}, TContext> => {
+
+const mutationKey = ['startSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startSession>>, {sessionId: string;data: BodyType<StreamInput>}> = (props) => {
+          const {sessionId,data} = props ?? {};
+
+          return  startSession(sessionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartSessionMutationResult = NonNullable<Awaited<ReturnType<typeof startSession>>>
+    export type StartSessionMutationBody = BodyType<StreamInput>
+    export type StartSessionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Start streaming in a specific session
+ */
+export const useStartSession = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startSession>>, TError,{sessionId: string;data: BodyType<StreamInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startSession>>,
+        TError,
+        {sessionId: string;data: BodyType<StreamInput>},
+        TContext
+      > => {
+      return useMutation(getStartSessionMutationOptions(options));
+    }
+
+export const getStopSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}/stop`
+}
+
+/**
+ * @summary Stop a specific session
+ */
+export const stopSession = async (sessionId: string, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getStopSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getStopSessionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stopSession>>, TError,{sessionId: string}, TContext> => {
+
+const mutationKey = ['stopSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopSession>>, {sessionId: string}> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  stopSession(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StopSessionMutationResult = NonNullable<Awaited<ReturnType<typeof stopSession>>>
+
+    export type StopSessionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Stop a specific session
+ */
+export const useStopSession = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stopSession>>,
+        TError,
+        {sessionId: string},
+        TContext
+      > => {
+      return useMutation(getStopSessionMutationOptions(options));
+    }
+
+export const getPauseSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}/pause`
+}
+
+/**
+ * @summary Pause a specific session
+ */
+export const pauseSession = async (sessionId: string, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getPauseSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPauseSessionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pauseSession>>, TError,{sessionId: string}, TContext> => {
+
+const mutationKey = ['pauseSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pauseSession>>, {sessionId: string}> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  pauseSession(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PauseSessionMutationResult = NonNullable<Awaited<ReturnType<typeof pauseSession>>>
+
+    export type PauseSessionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Pause a specific session
+ */
+export const usePauseSession = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pauseSession>>,
+        TError,
+        {sessionId: string},
+        TContext
+      > => {
+      return useMutation(getPauseSessionMutationOptions(options));
+    }
+
+export const getResumeSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}/resume`
+}
+
+/**
+ * @summary Resume a specific session
+ */
+export const resumeSession = async (sessionId: string, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getResumeSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResumeSessionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeSession>>, TError,{sessionId: string}, TContext> => {
+
+const mutationKey = ['resumeSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeSession>>, {sessionId: string}> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  resumeSession(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeSessionMutationResult = NonNullable<Awaited<ReturnType<typeof resumeSession>>>
+
+    export type ResumeSessionMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Resume a specific session
+ */
+export const useResumeSession = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeSession>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeSession>>,
+        TError,
+        {sessionId: string},
+        TContext
+      > => {
+      return useMutation(getResumeSessionMutationOptions(options));
+    }
+
+export const getSetSessionVolumeUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}/volume`
+}
+
+/**
+ * @summary Set volume for a specific session
+ */
+export const setSessionVolume = async (sessionId: string,
+    volumeInput: VolumeInput, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getSetSessionVolumeUrl(sessionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      volumeInput,)
+  }
+);}
+
+
+
+
+export const getSetSessionVolumeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSessionVolume>>, TError,{sessionId: string;data: BodyType<VolumeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setSessionVolume>>, TError,{sessionId: string;data: BodyType<VolumeInput>}, TContext> => {
+
+const mutationKey = ['setSessionVolume'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setSessionVolume>>, {sessionId: string;data: BodyType<VolumeInput>}> = (props) => {
+          const {sessionId,data} = props ?? {};
+
+          return  setSessionVolume(sessionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetSessionVolumeMutationResult = NonNullable<Awaited<ReturnType<typeof setSessionVolume>>>
+    export type SetSessionVolumeMutationBody = BodyType<VolumeInput>
+    export type SetSessionVolumeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Set volume for a specific session
+ */
+export const useSetSessionVolume = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSessionVolume>>, TError,{sessionId: string;data: BodyType<VolumeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setSessionVolume>>,
+        TError,
+        {sessionId: string;data: BodyType<VolumeInput>},
+        TContext
+      > => {
+      return useMutation(getSetSessionVolumeMutationOptions(options));
+    }
+
+export const getSwitchSessionVideoUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/stream/sessions/${sessionId}/switch-video`
+}
+
+/**
+ * @summary Switch video for a specific session
+ */
+export const switchSessionVideo = async (sessionId: string,
+    switchVideoInput: SwitchVideoInput, options?: RequestInit): Promise<SessionState> => {
+
+  return customFetch<SessionState>(getSwitchSessionVideoUrl(sessionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      switchVideoInput,)
+  }
+);}
+
+
+
+
+export const getSwitchSessionVideoMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchSessionVideo>>, TError,{sessionId: string;data: BodyType<SwitchVideoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof switchSessionVideo>>, TError,{sessionId: string;data: BodyType<SwitchVideoInput>}, TContext> => {
+
+const mutationKey = ['switchSessionVideo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof switchSessionVideo>>, {sessionId: string;data: BodyType<SwitchVideoInput>}> = (props) => {
+          const {sessionId,data} = props ?? {};
+
+          return  switchSessionVideo(sessionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SwitchSessionVideoMutationResult = NonNullable<Awaited<ReturnType<typeof switchSessionVideo>>>
+    export type SwitchSessionVideoMutationBody = BodyType<SwitchVideoInput>
+    export type SwitchSessionVideoMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Switch video for a specific session
+ */
+export const useSwitchSessionVideo = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchSessionVideo>>, TError,{sessionId: string;data: BodyType<SwitchVideoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof switchSessionVideo>>,
+        TError,
+        {sessionId: string;data: BodyType<SwitchVideoInput>},
+        TContext
+      > => {
+      return useMutation(getSwitchSessionVideoMutationOptions(options));
+    }
+
 export const getImportChannelListUrl = () => {
 
 
@@ -852,7 +1648,7 @@ export const getImportChannelListUrl = () => {
 }
 
 /**
- * @summary List videos from a public YouTube channel or playlist URL
+ * @summary List videos from a public YouTube channel/playlist (yt-dlp)
  */
 export const importChannelList = async (importListInput: ImportListInput, options?: RequestInit): Promise<ImportListResult> => {
 
@@ -901,7 +1697,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ImportChannelListMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary List videos from a public YouTube channel or playlist URL
+ * @summary List videos from a public YouTube channel/playlist (yt-dlp)
  */
 export const useImportChannelList = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importChannelList>>, TError,{data: BodyType<ImportListInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -923,7 +1719,7 @@ export const getImportDownloadUrl = () => {
 }
 
 /**
- * @summary Start downloading a YouTube video into the uploads folder
+ * @summary Start downloading a YouTube video
  */
 export const importDownload = async (importDownloadInput: ImportDownloadInput, options?: RequestInit): Promise<ImportDownloadResult> => {
 
@@ -972,7 +1768,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ImportDownloadMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Start downloading a YouTube video into the uploads folder
+ * @summary Start downloading a YouTube video
  */
 export const useImportDownload = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importDownload>>, TError,{data: BodyType<ImportDownloadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -994,7 +1790,7 @@ export const getImportProgressUrl = (jobId: string,) => {
 }
 
 /**
- * @summary Get download progress for a specific job
+ * @summary Get download progress
  */
 export const importProgress = async (jobId: string, options?: RequestInit): Promise<ImportProgressResult> => {
 
@@ -1041,7 +1837,7 @@ export type ImportProgressQueryError = ErrorType<ErrorResponse>
 
 
 /**
- * @summary Get download progress for a specific job
+ * @summary Get download progress
  */
 
 export function useImportProgress<TData = Awaited<ReturnType<typeof importProgress>>, TError = ErrorType<ErrorResponse>>(
