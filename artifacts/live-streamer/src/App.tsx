@@ -14,9 +14,21 @@ import {
   useImportChannelList,
   useImportDownload,
   useImportProgress,
+  useListSessions,
+  useCreateSession,
+  useDeleteSession,
+  useRenameSession,
+  useStartSession,
+  useStopSession,
+  usePauseSession,
+  useResumeSession,
+  useSetSessionVolume,
+  useSwitchSessionVideo,
   getGetStreamStatusQueryKey,
   getListVideosQueryKey,
+  getListSessionsQueryKey,
   setBaseUrl,
+  type SessionState,
 } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
@@ -79,10 +91,8 @@ function fmtCountdown(ms: number) {
   return `${Math.floor(s / 3600).toString().padStart(2, "0")}:${Math.floor((s % 3600) / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 }
 
-// ── Tab type ─────────────────────────────────────────────────────────────────
-type Tab = "stream" | "playlist" | "import";
+type Tab = "stream" | "playlist" | "import" | "sessions";
 
-// ── Volume icon ───────────────────────────────────────────────────────────────
 function VolumeIcon({ level }: { level: number }) {
   if (level === 0) return (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -102,7 +112,6 @@ function VolumeIcon({ level }: { level: number }) {
   );
 }
 
-// ── Import progress hook (polling) ────────────────────────────────────────────
 function ImportProgressPoller({ jobId, onDone }: { jobId: string; onDone: (filename: string) => void }) {
   const { data } = useImportProgress(jobId, {
     query: {
@@ -112,29 +121,242 @@ function ImportProgressPoller({ jobId, onDone }: { jobId: string; onDone: (filen
   });
 
   useEffect(() => {
-    if (data?.status === "done" && data.filename) {
-      onDone(data.filename);
-    }
+    if (data?.status === "done" && data.filename) onDone(data.filename);
   }, [data?.status, data?.filename, onDone]);
 
   if (!data) return <div className="text-xs text-white/30 animate-pulse">Iniciando…</div>;
-
-  if (data.status === "error") return (
-    <div className="text-xs text-red-400">❌ {data.error ?? "Erro ao baixar"}</div>
-  );
-  if (data.status === "done") return (
-    <div className="text-xs text-emerald-400">✅ {data.filename ?? "Concluído"}</div>
-  );
+  if (data.status === "error") return <div className="text-xs text-red-400">❌ {data.error ?? "Erro ao baixar"}</div>;
+  if (data.status === "done") return <div className="text-xs text-emerald-400">✅ {data.filename ?? "Concluído"}</div>;
 
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-[11px] text-white/40">
-        <span>Baixando…</span>
-        <span>{data.percent.toFixed(0)}%</span>
+        <span>Baixando…</span><span>{data.percent.toFixed(0)}%</span>
       </div>
       <div className="w-full bg-white/[0.06] rounded-full h-1">
         <div className="progress-fill h-1 rounded-full transition-all" style={{ width: `${data.percent}%` }} />
       </div>
+    </div>
+  );
+}
+
+// ── Session Card ──────────────────────────────────────────────────────────────
+
+function SessionCard({ session, videos, onInvalidate }: {
+  session: SessionState;
+  videos: { filename: string; originalName: string }[];
+  onInvalidate: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [nameVal, setNameVal] = useState(session.name);
+  const [showStart, setShowStart] = useState(false);
+  const [sk, setSk] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [selVideo, setSelVideo] = useState(session.videoFile ?? "");
+  const [fmt, setFmt] = useState<"landscape" | "shorts">("landscape");
+  const [vol, setVol] = useState(session.volume);
+  const [elapsed, setElapsed] = useState("00:00:00");
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (session.isStreaming && session.startedAt) {
+      timerRef.current = setInterval(() => setElapsed(formatDur(session.startedAt)), 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setElapsed("00:00:00");
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [session.isStreaming, session.startedAt]);
+
+  const renameM = useRenameSession({ mutation: { onSuccess: onInvalidate } });
+  const startM = useStartSession({ mutation: { onSuccess: () => { setShowStart(false); onInvalidate(); } } });
+  const stopM = useStopSession({ mutation: { onSuccess: onInvalidate } });
+  const pauseM = usePauseSession({ mutation: { onSuccess: onInvalidate } });
+  const resumeM = useResumeSession({ mutation: { onSuccess: onInvalidate } });
+  const volM = useSetSessionVolume({ mutation: { onSuccess: onInvalidate } });
+  const switchM = useSwitchSessionVideo({ mutation: { onSuccess: onInvalidate } });
+  const deleteM = useDeleteSession({ mutation: { onSuccess: onInvalidate } });
+
+  const isDefault = session.id === "default";
+  const live = session.isStreaming;
+  const paused = session.isPaused;
+
+  const statusColor = live && !paused ? "text-red-400" : live && paused ? "text-amber-400" : "text-white/25";
+  const statusLabel = live && !paused ? `● LIVE · ${elapsed}` : live && paused ? "⏸ PAUSADO" : "● PARADO";
+
+  return (
+    <div className="card p-5 fade-in space-y-4">
+      {/* Header */}
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (nameVal.trim()) { renameM.mutate({ sessionId: session.id, data: { name: nameVal.trim() } }); }
+              setEditing(false);
+            }} className="flex gap-2">
+              <input autoFocus value={nameVal} onChange={(e) => setNameVal(e.target.value)}
+                className="flex-1 bg-white/[0.06] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none" />
+              <button type="submit" className="px-3 py-1.5 rounded-lg text-xs font-bold text-black accent-bg">✓</button>
+              <button type="button" onClick={() => { setEditing(false); setNameVal(session.name); }}
+                className="px-3 py-1.5 rounded-lg text-xs btn-ghost">✕</button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-base truncate">{session.name}</h3>
+              <button onClick={() => { setNameVal(session.name); setEditing(true); }}
+                className="text-white/20 hover:text-white/50 transition-colors shrink-0" title="Renomear">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </button>
+            </div>
+          )}
+          <p className={`text-xs font-semibold mt-0.5 ${statusColor}`}>{statusLabel}</p>
+          {live && session.videoFile && (
+            <p className="text-[11px] text-white/30 mt-0.5 truncate">▶ {session.videoFile}</p>
+          )}
+        </div>
+
+        {!isDefault && !live && (
+          <button onClick={() => deleteM.mutate({ sessionId: session.id })}
+            className="text-white/15 hover:text-red-400 transition-colors shrink-0 p-1" title="Deletar sessão">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Error */}
+      {session.error && !live && (
+        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+          ⚠️ {session.error}
+        </p>
+      )}
+
+      {/* Controls when live */}
+      {live && (
+        <div className="space-y-3">
+          {/* Volume */}
+          <div className="flex items-center gap-3">
+            <div className="text-white/30"><VolumeIcon level={vol} /></div>
+            <input type="range" min={0} max={100} value={vol}
+              onChange={(e) => setVol(Number(e.target.value))}
+              onMouseUp={() => volM.mutate({ sessionId: session.id, data: { volume: vol } })}
+              onTouchEnd={() => volM.mutate({ sessionId: session.id, data: { volume: vol } })}
+              className="flex-1 h-1" />
+            <span className="text-xs text-white/30 w-7 text-right">{vol}%</span>
+          </div>
+
+          {/* Switch video */}
+          {videos.length > 0 && (
+            <div className="flex gap-2 items-center">
+              <select value={selVideo} onChange={(e) => setSelVideo(e.target.value)}
+                className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2 text-xs text-white focus:outline-none">
+                {videos.map((v) => (
+                  <option key={v.filename} value={v.filename}>{v.originalName}</option>
+                ))}
+              </select>
+              <button onClick={() => { if (selVideo) switchM.mutate({ sessionId: session.id, data: { videoFile: selVideo } }); }}
+                disabled={!selVideo || selVideo === session.videoFile}
+                className="px-3 py-2 rounded-xl text-xs font-bold accent-bg text-black disabled:opacity-30 whitespace-nowrap">
+                Trocar
+              </button>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            {paused ? (
+              <button onClick={() => resumeM.mutate({ sessionId: session.id })}
+                disabled={resumeM.isPending}
+                className="flex-1 py-2 rounded-xl text-sm font-bold text-black accent-bg disabled:opacity-40">
+                ▶ Retomar
+              </button>
+            ) : (
+              <button onClick={() => pauseM.mutate({ sessionId: session.id })}
+                disabled={pauseM.isPending}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold btn-ghost">
+                ⏸ Pausar
+              </button>
+            )}
+            <button onClick={() => stopM.mutate({ sessionId: session.id })}
+              disabled={stopM.isPending}
+              className="flex-1 py-2 rounded-xl text-sm font-semibold text-red-400 border border-red-500/20 hover:bg-red-500/10 transition-colors disabled:opacity-40">
+              ⏹ Parar Live
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Start form */}
+      {!live && (
+        <>
+          {!showStart ? (
+            <button onClick={() => setShowStart(true)}
+              className="w-full py-2.5 rounded-xl text-sm font-bold text-black accent-bg">
+              ▶ Iniciar Live
+            </button>
+          ) : (
+            <div className="space-y-3 card-inner p-4">
+              <div className="relative">
+                <input type={showKey ? "text" : "password"} value={sk} onChange={(e) => setSk(e.target.value)}
+                  placeholder="Stream Key do YouTube"
+                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none pr-12" />
+                <button type="button" onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 text-xs">
+                  {showKey ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+
+              <select value={selVideo} onChange={(e) => setSelVideo(e.target.value)}
+                className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none">
+                <option value="">— Escolha um vídeo —</option>
+                {videos.map((v) => (
+                  <option key={v.filename} value={v.filename}>{v.originalName}</option>
+                ))}
+              </select>
+
+              <div className="flex gap-2">
+                {(["landscape", "shorts"] as const).map((f) => (
+                  <button key={f} onClick={() => setFmt(f)}
+                    className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${fmt === f ? "accent-bg text-black" : "btn-ghost text-white/50"}`}>
+                    {f === "landscape" ? "🖥 16:9" : "📱 Shorts"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <VolumeIcon level={vol} />
+                <input type="range" min={0} max={100} value={vol} onChange={(e) => setVol(Number(e.target.value))} className="flex-1" />
+                <span className="text-xs text-white/30 w-7">{vol}%</span>
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={() => {
+                  if (!sk.trim() || !selVideo) return;
+                  startM.mutate({ sessionId: session.id, data: { streamKey: sk.trim(), videoFile: selVideo, format: fmt, volume: vol } });
+                }}
+                  disabled={!sk.trim() || !selVideo || startM.isPending}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-black accent-bg disabled:opacity-30">
+                  {startM.isPending ? "Iniciando…" : "🔴 Ir ao Vivo"}
+                </button>
+                <button onClick={() => setShowStart(false)} className="px-4 py-2.5 rounded-xl text-sm btn-ghost">
+                  Cancelar
+                </button>
+              </div>
+
+              {startM.isError && (
+                <p className="text-xs text-red-400">
+                  {(startM.error as { data?: { error?: string } })?.data?.error ?? "Erro ao iniciar"}
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -164,13 +386,19 @@ function StreamerApp() {
   const [testingConn, setTestingConn] = useState(false);
   const [connResult, setConnResult] = useState<"ok" | "fail" | null>(null);
 
-  // Playlist state
+  // Playlist
   const [playlist, setPlaylist] = useState<string[]>([]);
   const [usePlaylistMode, setUsePlaylistMode] = useState(false);
 
-  // Import state
+  // Import
   const [channelUrl, setChannelUrl] = useState("");
+  const [importLimit, setImportLimit] = useState(20);
+  const [importSort, setImportSort] = useState<"newest" | "oldest">("newest");
   const [downloadJobs, setDownloadJobs] = useState<{ jobId: string; title: string }[]>([]);
+
+  // New session
+  const [newSessionName, setNewSessionName] = useState("");
+  const [showNewSession, setShowNewSession] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -185,7 +413,6 @@ function StreamerApp() {
     document.documentElement.style.setProperty("--accent-rgb", hexToRgb(accent));
     localStorage.setItem("accent", accent);
   }, [accent]);
-
   useEffect(() => { localStorage.setItem("autoRestart", String(autoRestart)); }, [autoRestart]);
 
   const needsBackend = IS_GITHUB_PAGES && !backendUrl;
@@ -193,26 +420,25 @@ function StreamerApp() {
   const { data: status } = useGetStreamStatus({
     query: { queryKey: getGetStreamStatusQueryKey(), refetchInterval: 2000, enabled: !needsBackend },
   });
-  const { data: videos } = useListVideos({
+  const { data: videos = [] } = useListVideos({
     query: { queryKey: getListVideosQueryKey(), enabled: !needsBackend },
   });
+  const { data: sessions = [] } = useListSessions({
+    query: { queryKey: getListSessionsQueryKey(), refetchInterval: 3000, enabled: !needsBackend },
+  });
 
-  const inv = useCallback(() => {
-    qc.invalidateQueries({ queryKey: getGetStreamStatusQueryKey() });
-  }, [qc]);
+  const inv = useCallback(() => qc.invalidateQueries({ queryKey: getGetStreamStatusQueryKey() }), [qc]);
+  const invVideos = useCallback(() => qc.invalidateQueries({ queryKey: getListVideosQueryKey() }), [qc]);
+  const invSessions = useCallback(() => qc.invalidateQueries({ queryKey: getListSessionsQueryKey() }), [qc]);
 
-  const invVideos = useCallback(() => {
-    qc.invalidateQueries({ queryKey: getListVideosQueryKey() });
-  }, [qc]);
-
-  const startM = useStartStream({ mutation: { onSuccess: inv } });
-  const stopM = useStopStream({ mutation: { onSuccess: inv } });
-  const pauseM = usePauseStream({ mutation: { onSuccess: inv } });
-  const resumeM = useResumeStream({ mutation: { onSuccess: inv } });
+  const startM = useStartStream({ mutation: { onSuccess: () => { inv(); invSessions(); } } });
+  const stopM = useStopStream({ mutation: { onSuccess: () => { inv(); invSessions(); } } });
+  const pauseM = usePauseStream({ mutation: { onSuccess: () => { inv(); invSessions(); } } });
+  const resumeM = useResumeStream({ mutation: { onSuccess: () => { inv(); invSessions(); } } });
   const volumeM = useSetVolume({ mutation: { onSuccess: inv } });
   const switchM = useSwitchVideo({ mutation: { onSuccess: inv } });
   const playlistM = useUpdatePlaylist({ mutation: { onSuccess: inv } });
-  const deleteM = useDeleteVideo({
+  const deleteVideoM = useDeleteVideo({
     mutation: {
       onSuccess: (_d, { filename }) => {
         invVideos();
@@ -221,13 +447,14 @@ function StreamerApp() {
       },
     },
   });
+  const createSessionM = useCreateSession({
+    mutation: {
+      onSuccess: () => { invSessions(); setShowNewSession(false); setNewSessionName(""); },
+    },
+  });
   const importListM = useImportChannelList();
   const importDownloadM = useImportDownload({
-    mutation: {
-      onSuccess: (data) => {
-        setDownloadJobs((j) => [...j, { jobId: data.jobId, title: data.title }]);
-      },
-    },
+    mutation: { onSuccess: (data) => setDownloadJobs((j) => [...j, { jobId: data.jobId, title: data.title }]) },
   });
 
   const isStreaming = status?.isStreaming ?? false;
@@ -243,40 +470,23 @@ function StreamerApp() {
 
   useEffect(() => {
     if (isStreaming && status?.startedAt) startTimer(status.startedAt);
-    else {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-      setElapsed("00:00:00");
-    }
+    else { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } setElapsed("00:00:00"); }
   }, [isStreaming, status?.startedAt, startTimer]);
 
-  // Auto-restart
   useEffect(() => {
     if (prevStreaming.current === null) { prevStreaming.current = isStreaming; return; }
-    const was = prevStreaming.current;
-    prevStreaming.current = isStreaming;
+    const was = prevStreaming.current; prevStreaming.current = isStreaming;
     if (was && !isStreaming && status?.error && autoRestart && lastParams.current) {
       let s = 10; setRestartCountdown(s);
-      restartCdRef.current = setInterval(() => {
-        s--;
-        if (s <= 0) { clearInterval(restartCdRef.current!); setRestartCountdown(null); }
-        else setRestartCountdown(s);
-      }, 1000);
-      restartTimerRef.current = setTimeout(() => {
-        if (lastParams.current) startM.mutate({ data: lastParams.current });
-      }, 10000);
+      restartCdRef.current = setInterval(() => { s--; if (s <= 0) { clearInterval(restartCdRef.current!); setRestartCountdown(null); } else setRestartCountdown(s); }, 1000);
+      restartTimerRef.current = setTimeout(() => { if (lastParams.current) startM.mutate({ data: lastParams.current }); }, 10000);
     }
-    if (isStreaming) {
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      if (restartCdRef.current) clearInterval(restartCdRef.current);
-      setRestartCountdown(null);
-    }
+    if (isStreaming) { if (restartTimerRef.current) clearTimeout(restartTimerRef.current); if (restartCdRef.current) clearInterval(restartCdRef.current); setRestartCountdown(null); }
   }, [isStreaming]); // eslint-disable-line
 
-  // Schedule
   useEffect(() => {
     if (!scheduleActive || !scheduleTime) return;
-    const target = getScheduleTarget(scheduleTime);
-    if (!target) return;
+    const target = getScheduleTarget(scheduleTime); if (!target) return;
     schedTimerRef.current = setInterval(() => {
       const rem = target.getTime() - Date.now();
       if (rem <= 0) {
@@ -290,9 +500,7 @@ function StreamerApp() {
     return () => { if (schedTimerRef.current) clearInterval(schedTimerRef.current); };
   }, [scheduleActive]); // eslint-disable-line
 
-  function getUploadUrl() {
-    return backendUrl ? `${backendUrl}/api/stream/upload` : `${BASE}/api/stream/upload`;
-  }
+  function getUploadUrl() { return backendUrl ? `${backendUrl}/api/stream/upload` : `${BASE}/api/stream/upload`; }
 
   async function handleUpload(file: File) {
     setUploading(true); setUploadError(""); setUploadProgress(0);
@@ -300,21 +508,11 @@ function StreamerApp() {
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", getUploadUrl());
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) setUploadProgress(Math.round(e.loaded / e.total * 100));
-      };
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) setUploadProgress(Math.round(e.loaded / e.total * 100)); };
       xhr.onload = () => {
         setUploading(false);
-        if (xhr.status === 200) {
-          try {
-            const d = JSON.parse(xhr.responseText);
-            invVideos(); setSelectedVideo(d.filename); resolve();
-          } catch { setUploadError("Resposta inválida do servidor"); reject(); }
-        } else {
-          try { setUploadError(JSON.parse(xhr.responseText).error || "Upload falhou"); }
-          catch { setUploadError(`Upload falhou (${xhr.status})`); }
-          reject();
-        }
+        if (xhr.status === 200) { try { const d = JSON.parse(xhr.responseText); invVideos(); setSelectedVideo(d.filename); resolve(); } catch { setUploadError("Resposta inválida"); reject(); } }
+        else { try { setUploadError(JSON.parse(xhr.responseText).error || "Upload falhou"); } catch { setUploadError(`Upload falhou (${xhr.status})`); } reject(); }
       };
       xhr.onerror = () => { setUploading(false); setUploadError("Erro de conexão"); reject(); };
       xhr.send(form);
@@ -322,20 +520,16 @@ function StreamerApp() {
   }
 
   async function testConnection() {
-    const url = normalizeBackendUrl(backendUrlDraft);
-    if (!url) return;
+    const url = normalizeBackendUrl(backendUrlDraft); if (!url) return;
     setTestingConn(true); setConnResult(null);
-    try {
-      const r = await fetch(`${url}/api/healthz`, { signal: AbortSignal.timeout(8000) });
-      setConnResult(r.ok ? "ok" : "fail");
-    } catch { setConnResult("fail"); }
-    finally { setTestingConn(false); }
+    try { const r = await fetch(`${url}/api/healthz`, { signal: AbortSignal.timeout(8000) }); setConnResult(r.ok ? "ok" : "fail"); }
+    catch { setConnResult("fail"); } finally { setTestingConn(false); }
   }
 
   function saveBackendUrl() {
     const n = normalizeBackendUrl(backendUrlDraft);
     applyBackendUrl(n); setBackendUrlDraft(n); setBackendUrlState(n); setConnResult(null);
-    inv(); invVideos();
+    inv(); invVideos(); invSessions();
   }
 
   function handleStart() {
@@ -344,41 +538,15 @@ function StreamerApp() {
     const p = { streamKey: streamKey.trim(), videoFile: selectedVideo, format, volume, playlist: pl };
     lastParams.current = p; startM.mutate({ data: p });
   }
-
-  function handleVolumeChange(v: number) {
-    setVolume(v);
-    if (isStreaming) volumeM.mutate({ data: { volume: v } });
-  }
-
-  function handleSchedule() {
-    const t = getScheduleTarget(scheduleTime); if (!t) return;
-    setScheduleActive(true); setScheduleCountdown(fmtCountdown(t.getTime() - Date.now()));
-  }
-
-  function addToPlaylist(filename: string) {
-    if (!playlist.includes(filename)) {
-      const next = [...playlist, filename];
-      setPlaylist(next);
-      if (isStreaming) playlistM.mutate({ data: { playlist: next } });
-    }
-  }
-
-  function removeFromPlaylist(idx: number) {
-    const next = playlist.filter((_, i) => i !== idx);
-    setPlaylist(next);
-    if (isStreaming) playlistM.mutate({ data: { playlist: next } });
-  }
-
-  function moveInPlaylist(from: number, to: number) {
-    const next = [...playlist];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item!);
-    setPlaylist(next);
-    if (isStreaming) playlistM.mutate({ data: { playlist: next } });
-  }
+  function handleVolumeChange(v: number) { setVolume(v); if (isStreaming) volumeM.mutate({ data: { volume: v } }); }
+  function handleSchedule() { const t = getScheduleTarget(scheduleTime); if (!t) return; setScheduleActive(true); setScheduleCountdown(fmtCountdown(t.getTime() - Date.now())); }
+  function addToPlaylist(fn: string) { if (!playlist.includes(fn)) { const n = [...playlist, fn]; setPlaylist(n); if (isStreaming) playlistM.mutate({ data: { playlist: n } }); } }
+  function removeFromPlaylist(i: number) { const n = playlist.filter((_, j) => j !== i); setPlaylist(n); if (isStreaming) playlistM.mutate({ data: { playlist: n } }); }
+  function moveInPlaylist(from: number, to: number) { const n = [...playlist]; const [item] = n.splice(from, 1); n.splice(to, 0, item!); setPlaylist(n); if (isStreaming) playlistM.mutate({ data: { playlist: n } }); }
 
   const canStart = !!(streamKey.trim() && selectedVideo && !isStreaming && !startM.isPending && !uploading && !needsBackend);
   const accentRgb = hexToRgb(accent);
+  const activeLives = sessions.filter((s) => s.isStreaming).length;
 
   return (
     <div className="min-h-screen text-white font-sans" style={{ background: "#080808" }}>
@@ -410,10 +578,9 @@ function StreamerApp() {
         .live-ring{animation:pulse-ring 1.5s ease-out infinite;}
         .playlist-item{background:#111;border:1px solid rgba(255,255,255,0.05);border-radius:14px;}
         .playlist-item.active{border-color:rgba(var(--accent-rgb),0.4);background:rgba(var(--accent-rgb),0.06);}
-        .drag-over{border-color:rgba(var(--accent-rgb),0.5)!important;}
       `}</style>
 
-      {/* ── NAV ── */}
+      {/* NAV */}
       <nav className="sticky top-0 z-50 border-b border-white/[0.04]" style={{ background: "rgba(8,8,8,0.92)", backdropFilter: "blur(16px)" }}>
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl accent-bg flex items-center justify-center shrink-0 accent-glow">
@@ -421,13 +588,13 @@ function StreamerApp() {
           </div>
           <span className="font-bold tracking-tight">LiveStream Loop</span>
 
-          {isStreaming && (
+          {(isStreaming || activeLives > 0) && (
             <div className="relative ml-1 flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold live-badge fade-in">
               <span className="relative flex h-2 w-2">
                 <span className="live-ring absolute inline-flex h-full w-full rounded-full live-dot opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 live-dot" />
               </span>
-              {isPaused ? "⏸ PAUSADO" : `LIVE · ${elapsed}`}
+              {activeLives > 1 ? `${activeLives} LIVES ATIVAS` : isPaused ? "⏸ PAUSADO" : `LIVE · ${elapsed}`}
             </div>
           )}
 
@@ -449,17 +616,22 @@ function StreamerApp() {
         </div>
 
         {/* Tabs */}
-        <div className="max-w-5xl mx-auto px-4 flex gap-0">
-          {([["stream", "🔴 Stream"], ["playlist", "📋 Playlist"], ["import", "📥 Importar"]] as [Tab, string][]).map(([t, label]) => (
+        <div className="max-w-5xl mx-auto px-4 flex gap-0 overflow-x-auto">
+          {([
+            ["stream", "🔴 Stream"],
+            ["playlist", "📋 Playlist"],
+            ["sessions", `📡 Minhas Lives${activeLives > 0 ? ` (${activeLives})` : ""}`],
+            ["import", "📥 Importar"],
+          ] as [Tab, string][]).map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-2.5 text-sm font-semibold transition-all ${tab === t ? "tab-active" : "tab-inactive hover:text-white/50"}`}>
+              className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${tab === t ? "tab-active" : "tab-inactive hover:text-white/50"}`}>
               {label}
             </button>
           ))}
         </div>
       </nav>
 
-      {/* ── SETTINGS ── */}
+      {/* Settings */}
       {showSettings && (
         <div className="border-b border-white/[0.04] px-4 py-5 fade-in" style={{ background: "#0d0d0d" }}>
           <div className="max-w-5xl mx-auto space-y-5">
@@ -468,22 +640,18 @@ function StreamerApp() {
                 Backend URL {IS_GITHUB_PAGES && <span className="text-amber-400 ml-1 normal-case">— obrigatório no GitHub Pages</span>}
               </p>
               <div className="flex gap-2">
-                <input type="text" value={backendUrlDraft}
-                  onChange={(e) => { setBackendUrlDraft(e.target.value); setConnResult(null); }}
+                <input type="text" value={backendUrlDraft} onChange={(e) => { setBackendUrlDraft(e.target.value); setConnResult(null); }}
                   placeholder="youtubelivestreamer-production.up.railway.app"
                   className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/20" />
                 <button onClick={testConnection} disabled={testingConn || !backendUrlDraft.trim()}
                   className="px-3 py-2.5 rounded-xl text-sm font-semibold btn-ghost disabled:opacity-40 whitespace-nowrap">
                   {testingConn ? "…" : "Testar"}
                 </button>
-                <button onClick={saveBackendUrl} className="px-4 py-2.5 rounded-xl text-sm font-bold text-black accent-bg whitespace-nowrap">
-                  Salvar
-                </button>
+                <button onClick={saveBackendUrl} className="px-4 py-2.5 rounded-xl text-sm font-bold text-black accent-bg whitespace-nowrap">Salvar</button>
               </div>
               {connResult === "ok" && <p className="text-xs text-emerald-400 mt-1.5">✅ Conectado! Clique em Salvar.</p>}
               {connResult === "fail" && <p className="text-xs text-red-400 mt-1.5">❌ Não foi possível conectar.</p>}
             </div>
-
             <div>
               <p className="text-[11px] font-semibold text-white/30 uppercase tracking-widest mb-2">Cor de destaque</p>
               <div className="flex flex-wrap gap-2">
@@ -492,399 +660,267 @@ function StreamerApp() {
                     className={`w-8 h-8 rounded-full border-2 transition-all ${accent === c.value ? "swatch-active scale-110" : "border-transparent"}`}
                     style={{ background: c.value }} />
                 ))}
-                <label className="w-8 h-8 rounded-full border-2 border-dashed border-white/15 flex items-center justify-center cursor-pointer hover:border-white/30 overflow-hidden relative">
-                  <span className="text-xs text-white/30">+</span>
-                  <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
-                </label>
               </div>
             </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">Auto-Restart</p>
-                <p className="text-xs text-white/30 mt-0.5">Se a live cair, reinicia automaticamente em 10s</p>
-              </div>
+            <div className="flex items-center gap-3">
               <button onClick={() => setAutoRestart(!autoRestart)}
                 className={`relative w-11 h-6 rounded-full transition-colors ${autoRestart ? "accent-bg" : "bg-white/10"}`}>
-                <span className="absolute top-0.5 h-5 w-5 bg-white rounded-full shadow transition-transform"
-                  style={{ left: "2px", transform: autoRestart ? "translateX(20px)" : "translateX(0)" }} />
+                <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${autoRestart ? "translate-x-5" : "translate-x-0.5"}`} />
               </button>
+              <div>
+                <p className="text-sm font-medium">Auto-reiniciar</p>
+                <p className="text-xs text-white/30">Reinicia automaticamente se a live cair</p>
+              </div>
+            </div>
+            {/* Redeploy warning */}
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+              <p className="text-xs font-bold text-amber-400 mb-1">⚠️ Por que minha live parou?</p>
+              <p className="text-xs text-white/40 leading-relaxed">
+                Toda vez que o Railway faz redeploy do backend (ex: quando o GitHub detecta um push de código), o servidor reinicia e o FFmpeg é encerrado. Evite fazer push enquanto estiver ao vivo, ou ative o "Auto-reiniciar" acima para reconectar automaticamente.
+              </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── BACKEND BANNER ── */}
-      {needsBackend && (
-        <div className="border-b border-amber-900/30 px-4 py-3" style={{ background: "rgba(120,80,0,0.12)" }}>
-          <div className="max-w-5xl mx-auto flex items-center gap-3">
-            <span className="text-amber-400 text-lg shrink-0">⚠️</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-amber-300 font-semibold">URL do backend necessária</p>
-              <p className="text-xs text-amber-700">Abra ⚙️ Configurações e insira a URL do Railway.</p>
-            </div>
-            <button onClick={() => setShowSettings(true)}
-              className="shrink-0 px-3 py-1.5 rounded-lg text-xs text-amber-300 font-semibold"
-              style={{ background: "rgba(120,80,0,0.3)" }}>
-              Configurar
-            </button>
-          </div>
-        </div>
-      )}
+      <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
 
-      <main className="max-w-5xl mx-auto px-4 py-8">
+        {needsBackend && (
+          <div className="card p-6 fade-in border-amber-500/20">
+            <p className="font-bold text-amber-400 mb-1">⚙️ Configure o Backend</p>
+            <p className="text-sm text-white/40">Abra as configurações (⚙️) e cole a URL do Railway para conectar ao servidor.</p>
+          </div>
+        )}
 
         {/* ══════════════ TAB: STREAM ══════════════ */}
         {tab === "stream" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* ── LEFT ── */}
-            <div className="space-y-4">
-
-              {/* Live Status Card */}
-              {isStreaming && (
-                <div className="card p-5 fade-in" style={{ borderColor: `rgba(${accentRgb},0.2)`, background: `rgba(${accentRgb},0.05)` }}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="relative w-3 h-3 flex items-center justify-center">
-                        <span className="absolute w-full h-full rounded-full live-dot live-ring opacity-50" />
-                        <span className="w-2.5 h-2.5 rounded-full live-dot" />
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm accent-text">{isPaused ? "Stream Pausada" : "Stream Ativa"}</p>
-                        {status?.startedAt && (
-                          <p className="text-[11px] text-white/30 mt-0.5">
-                            Iniciada às {new Date(status.startedAt).toLocaleTimeString("pt-BR")}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono text-lg font-bold text-white/80">{elapsed}</p>
-                      <p className="text-[11px] text-white/25 mt-0.5">{status?.format?.toUpperCase()} · {serverVolume}%🔊</p>
-                    </div>
-                  </div>
-
-                  {/* Playing now */}
-                  {status?.videoFile && (
-                    <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "rgba(0,0,0,0.3)" }}>
-                      <svg className="w-3.5 h-3.5 text-white/25 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-white/50 truncate">{status.videoFile}</p>
-                        {serverPlaylist.length > 1 && (
-                          <p className="text-[10px] text-white/25 mt-0.5">
-                            📋 {serverPlaylistIndex + 1}/{serverPlaylist.length} na playlist
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Switch video while live */}
-                  {isStreaming && videos && videos.length > 1 && (
-                    <div className="mt-3">
-                      <p className="text-[10px] text-white/25 uppercase tracking-widest mb-1.5">Trocar vídeo agora</p>
-                      <div className="flex gap-2 overflow-x-auto pb-1">
-                        {videos.map((v) => (
-                          <button key={v.filename}
-                            onClick={() => switchM.mutate({ data: { videoFile: v.filename } })}
-                            disabled={switchM.isPending || status?.videoFile === v.filename}
-                            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all disabled:opacity-40 ${status?.videoFile === v.filename ? "text-black accent-bg border-transparent" : "btn-ghost text-white/50 hover:text-white/80"}`}>
-                            {status?.videoFile === v.filename ? "▶ " : ""}{v.originalName.slice(0, 20)}{v.originalName.length > 20 ? "…" : ""}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Controls */}
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    {!isPaused ? (
-                      <button onClick={() => pauseM.mutate()} disabled={pauseM.isPending}
-                        className="py-2.5 rounded-xl text-sm font-semibold btn-ghost transition-all disabled:opacity-50 flex items-center justify-center gap-1.5">
-                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
-                        {pauseM.isPending ? "Pausando..." : "Pausar"}
-                      </button>
-                    ) : (
-                      <button onClick={() => resumeM.mutate()} disabled={resumeM.isPending}
-                        className="py-2.5 rounded-xl text-sm font-bold text-black accent-bg transition-all disabled:opacity-50 flex items-center justify-center gap-1.5">
-                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                        {resumeM.isPending ? "Retomando..." : "Retomar"}
-                      </button>
-                    )}
-                    <button onClick={() => stopM.mutate()} disabled={stopM.isPending}
-                      className="py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
-                      style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171" }}>
-                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-                      {stopM.isPending ? "Parando..." : "Parar Live"}
-                    </button>
-                  </div>
-
-                  {/* Volume - live */}
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5 text-white/40"><VolumeIcon level={serverVolume} /><span className="text-xs">Volume</span></div>
-                      <span className="text-xs font-mono text-white/50">{serverVolume}%</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => handleVolumeChange(0)} className="text-xs text-white/30 hover:text-white/60">🔇</button>
-                      <input type="range" min="0" max="100" value={serverVolume}
-                        onChange={(e) => handleVolumeChange(Number(e.target.value))} className="flex-1 h-1" />
-                      <button onClick={() => handleVolumeChange(100)} className="text-xs text-white/30 hover:text-white/60">🔊</button>
-                    </div>
-                    <div className="flex gap-1.5 mt-2">
-                      {[0, 25, 50, 75, 100].map((v) => (
-                        <button key={v} onClick={() => handleVolumeChange(v)}
-                          className={`flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all ${serverVolume === v ? "text-black accent-bg" : "btn-ghost text-white/30 hover:text-white/60"}`}>
-                          {v === 0 ? "🔇" : `${v}%`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Auto-restart countdown */}
-              {restartCountdown !== null && (
-                <div className="card p-4 fade-in" style={{ borderColor: "rgba(251,191,36,0.2)", background: "rgba(120,80,0,0.1)" }}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-amber-300 font-semibold">🔄 Reiniciando em {restartCountdown}s</p>
-                      <p className="text-xs text-amber-700 mt-0.5">Auto-restart ativado</p>
-                    </div>
-                    <button onClick={() => { if (restartTimerRef.current) clearTimeout(restartTimerRef.current); if (restartCdRef.current) clearInterval(restartCdRef.current); setRestartCountdown(null); }}
-                      className="px-3 py-1.5 rounded-lg text-xs text-amber-300 font-semibold btn-ghost">
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Error */}
-              {status?.error && !isStreaming && restartCountdown === null && (
-                <div className="card p-4 fade-in space-y-2" style={{ borderColor: "rgba(239,68,68,0.2)", background: "rgba(239,68,68,0.05)" }}>
-                  <p className="text-sm text-red-300 font-semibold">❌ {status.error.length > 100 ? status.error.slice(0, 100) + "…" : status.error}</p>
-                  <p className="text-xs text-red-400/60">💡 Confirme que o YouTube Studio está "Aguardando stream".</p>
-                </div>
-              )}
-
-              {/* ── Step 1: Video ── */}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Left: Setup */}
+            <div className="space-y-5">
+              {/* Stream Key */}
               <div className="card p-5">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="step-num w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">1</span>
-                  <h2 className="font-bold text-sm">Vídeo</h2>
+                  <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">1</span>
+                  <h2 className="font-bold text-sm">Stream Key do YouTube</h2>
                 </div>
-
-                <div className="card-inner border-dashed p-5 text-center cursor-pointer hover:border-white/15 transition-all"
-                  onClick={() => !uploading && fileInputRef.current?.click()}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}>
-                  <input ref={fileInputRef} type="file" accept=".mp4,.mov,.avi,.mkv,.webm,.flv" className="hidden"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }} />
-                  {uploading ? (
-                    <div className="space-y-3">
-                      <p className="text-sm text-white/50">Enviando {uploadProgress}%</p>
-                      <div className="w-full bg-white/[0.06] rounded-full h-1">
-                        <div className="progress-fill h-1 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-sm text-white/30">Clique ou arraste o vídeo</p>
-                      <p className="text-xs text-white/15 mt-1">MP4, MOV, AVI, MKV · Máx 2 GB</p>
-                    </>
-                  )}
-                </div>
-
-                {uploadError && <p className="text-xs text-red-400 mt-2 pl-1">⚠️ {uploadError}</p>}
-
-                {videos && videos.length > 0 && (
-                  <div className="mt-3 space-y-1.5">
-                    <p className="text-[10px] font-semibold text-white/20 uppercase tracking-widest pl-1">Seus vídeos</p>
-                    {videos.map((v) => (
-                      <div key={v.filename}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all ${selectedVideo === v.filename ? "video-selected border-transparent" : "border-white/[0.05] hover:border-white/10"}`}>
-                        <button onClick={() => setSelectedVideo(v.filename)} className="flex-1 flex items-center gap-2 min-w-0 text-left">
-                          <div className={`w-7 h-7 rounded-lg shrink-0 flex items-center justify-center ${selectedVideo === v.filename ? "accent-bg" : "bg-white/[0.04]"}`}>
-                            <svg className={`w-3.5 h-3.5 ${selectedVideo === v.filename ? "fill-black" : "fill-white/20"}`} viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                          </div>
-                          <div className="min-w-0">
-                            <p className={`text-xs font-medium truncate ${selectedVideo === v.filename ? "text-white" : "text-white/50"}`}>{v.originalName}</p>
-                            <p className="text-[10px] text-white/20">{formatBytes(v.size)}</p>
-                          </div>
-                        </button>
-                        {/* Add to playlist */}
-                        <button onClick={() => { addToPlaylist(v.filename); setTab("playlist"); }}
-                          title="Adicionar à playlist"
-                          className="shrink-0 w-7 h-7 rounded-lg btn-ghost flex items-center justify-center text-white/15 hover:text-white/60 transition-colors">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                          </svg>
-                        </button>
-                        <button onClick={() => deleteM.mutate({ filename: v.filename })}
-                          disabled={deleteM.isPending || (isStreaming && status?.videoFile === v.filename)}
-                          className="shrink-0 w-7 h-7 rounded-lg btn-ghost flex items-center justify-center text-white/15 hover:text-red-400 transition-colors disabled:opacity-30">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ── RIGHT ── */}
-            <div className="space-y-4">
-
-              {/* ── Step 2: Key + Format ── */}
-              <div className="card p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="step-num w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">2</span>
-                  <h2 className="font-bold text-sm">Stream Key</h2>
-                </div>
-                <p className="text-[11px] text-white/25 mb-2">YouTube Studio → Go Live → Chave de transmissão</p>
                 <div className="relative">
                   <input type={showKey ? "text" : "password"} value={streamKey}
-                    onChange={(e) => setStreamKey(e.target.value)}
+                    onChange={(e) => setStreamKey(e.target.value)} disabled={isStreaming}
                     placeholder="xxxx-xxxx-xxxx-xxxx-xxxx"
-                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/15 focus:outline-none pr-12 transition-colors"
-                    style={streamKey ? { borderColor: `rgba(${accentRgb},0.35)` } : {}} />
-                  <button onClick={() => setShowKey(!showKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white/50 transition-colors">
-                    {showKey
-                      ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                      : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                    }
+                    className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none disabled:opacity-40 pr-20" />
+                  <button type="button" onClick={() => setShowKey(!showKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/25 hover:text-white/60">
+                    {showKey ? "Ocultar" : "Mostrar"}
                   </button>
                 </div>
-
-                {/* Format */}
-                <div className="mt-4">
-                  <p className="text-[10px] font-semibold text-white/20 uppercase tracking-widest mb-2">Formato</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["landscape", "shorts"] as const).map((f) => (
-                      <button key={f} onClick={() => setFormat(f)}
-                        className="flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border text-sm font-semibold transition-all"
-                        style={format === f
-                          ? { borderColor: `rgba(${accentRgb},0.5)`, background: `rgba(${accentRgb},0.1)`, color: "white" }
-                          : { border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)", color: "rgba(255,255,255,0.3)" }}>
-                        {f === "landscape"
-                          ? <svg viewBox="0 0 32 18" className="w-8 h-5" fill="none"><rect x="1" y="1" width="30" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" /><path d="M12 9l5-3v6l-5-3z" fill="currentColor" opacity="0.6" /></svg>
-                          : <svg viewBox="0 0 18 32" className="w-5 h-8" fill="none"><rect x="1" y="1" width="16" height="30" rx="2" stroke="currentColor" strokeWidth="1.5" /><path d="M9 13l4 3-4 3V13z" fill="currentColor" opacity="0.6" /></svg>
-                        }
-                        <span className="text-xs">{f === "landscape" ? "Landscape" : "Shorts"}</span>
-                        <span className="text-[10px] opacity-40">{f === "landscape" ? "16:9 · YouTube" : "9:16 · Vertical"}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Volume pre-start */}
-                {!isStreaming && (
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5 text-white/30"><VolumeIcon level={volume} /><span className="text-[11px]">Volume inicial</span></div>
-                      <span className="text-[11px] font-mono text-white/40">{volume === 0 ? "🔇 Mudo" : `${volume}%`}</span>
-                    </div>
-                    <input type="range" min="0" max="100" value={volume}
-                      onChange={(e) => setVolume(Number(e.target.value))} className="w-full" />
-                    <div className="flex gap-1.5 mt-2">
-                      {[0, 25, 50, 75, 100].map((v) => (
-                        <button key={v} onClick={() => setVolume(v)}
-                          className={`flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all ${volume === v ? "text-black accent-bg" : "btn-ghost text-white/25 hover:text-white/50"}`}>
-                          {v === 0 ? "🔇" : `${v}%`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <p className="text-[11px] text-white/20 mt-2">YouTube Studio → Ir ao Vivo → Chave de stream</p>
               </div>
 
-              {/* ── Step 3: Control ── */}
+              {/* Video */}
+              <div className="card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">2</span>
+                    <h2 className="font-bold text-sm">Vídeo</h2>
+                  </div>
+                  <label className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${uploading ? "opacity-40 cursor-wait" : "btn-ghost hover:opacity-80"}`}>
+                    {uploading ? `${uploadProgress}%…` : "+ Upload"}
+                    <input ref={fileInputRef} type="file" accept="video/*" className="hidden" disabled={uploading}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleUpload(f).catch(() => {}); e.target.value = ""; } }} />
+                  </label>
+                </div>
+                {uploadError && <p className="text-xs text-red-400 mb-3">❌ {uploadError}</p>}
+                {uploading && (
+                  <div className="mb-3">
+                    <div className="w-full bg-white/[0.06] rounded-full h-1.5"><div className="progress-fill h-1.5 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} /></div>
+                  </div>
+                )}
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-0.5">
+                  {videos.length === 0 && !uploading && (
+                    <p className="text-xs text-white/20 text-center py-4">Nenhum vídeo. Faça upload ou importe do YouTube.</p>
+                  )}
+                  {videos.map((v) => {
+                    const isSel = selectedVideo === v.filename;
+                    return (
+                      <div key={v.filename} onClick={() => { if (!isStreaming) setSelectedVideo(v.filename); }}
+                        className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all border-white/[0.05] ${isSel ? "video-selected" : "hover:bg-white/[0.03]"} ${isStreaming ? "cursor-default" : ""}`}>
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${isSel ? "accent-bg" : "bg-white/10"}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{v.originalName}</p>
+                          <p className="text-[10px] text-white/25">{formatBytes(v.size)}</p>
+                        </div>
+                        {/* Switch mid-stream */}
+                        {isStreaming && !isSel && (
+                          <button onClick={(e) => { e.stopPropagation(); switchM.mutate({ data: { videoFile: v.filename } }); }}
+                            className="px-2 py-1 rounded-lg text-[10px] font-bold accent-bg text-black whitespace-nowrap">
+                            Trocar
+                          </button>
+                        )}
+                        {!isStreaming && (
+                          <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`Deletar "${v.originalName}"?`)) deleteVideoM.mutate({ filename: v.filename }); }}
+                            className="text-white/15 hover:text-red-400 transition-colors p-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                        {!isStreaming && (
+                          <button onClick={(e) => { e.stopPropagation(); addToPlaylist(v.filename); }}
+                            title="Adicionar à playlist"
+                            className={`text-white/15 hover:text-white/60 transition-colors p-1 ${playlist.includes(v.filename) ? "accent-text" : ""}`}>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Format + volume */}
               <div className="card p-5">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="step-num w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">3</span>
-                  <h2 className="font-bold text-sm">Controle</h2>
+                  <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">3</span>
+                  <h2 className="font-bold text-sm">Formato & Áudio</h2>
                 </div>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {(["landscape", "shorts"] as const).map((f) => (
+                    <button key={f} onClick={() => setFormat(f)} disabled={isStreaming}
+                      className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${format === f ? "accent-bg text-black" : "btn-ghost text-white/50"} disabled:opacity-40`}>
+                      {f === "landscape" ? "🖥 16:9 (Normal)" : "📱 9:16 (Shorts)"}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-white/40"><VolumeIcon level={volume} /></div>
+                  <input type="range" min={0} max={100} value={volume}
+                    onChange={(e) => handleVolumeChange(Number(e.target.value))} className="flex-1 h-1" />
+                  <span className="text-xs text-white/30 w-7 text-right">{volume}%</span>
+                </div>
+              </div>
 
-                {/* Playlist toggle */}
-                {!isStreaming && playlist.length > 1 && (
-                  <div className="flex items-center gap-3 mb-4 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
-                    <button onClick={() => setUsePlaylistMode(!usePlaylistMode)}
-                      className={`relative w-9 h-5 rounded-full transition-colors ${usePlaylistMode ? "accent-bg" : "bg-white/10"}`}>
-                      <span className="absolute top-0.5 h-4 w-4 bg-white rounded-full shadow transition-transform"
-                        style={{ left: "2px", transform: usePlaylistMode ? "translateX(16px)" : "translateX(0)" }} />
+              {/* Playlist mode toggle */}
+              {playlist.length > 1 && (
+                <div className="card p-4">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setUsePlaylistMode(!usePlaylistMode)} disabled={isStreaming}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${usePlaylistMode ? "accent-bg" : "bg-white/10"} disabled:opacity-40`}>
+                      <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${usePlaylistMode ? "translate-x-5" : "translate-x-0.5"}`} />
                     </button>
                     <div>
-                      <p className="text-xs font-semibold">Modo Playlist</p>
-                      <p className="text-[10px] text-white/30">{playlist.length} vídeos em fila</p>
+                      <p className="text-sm font-medium">Modo Playlist</p>
+                      <p className="text-xs text-white/30">{playlist.length} vídeos · avança automaticamente</p>
                     </div>
-                    <button onClick={() => setTab("playlist")} className="ml-auto text-[10px] accent-text underline underline-offset-2">editar</button>
                   </div>
-                )}
+                </div>
+              )}
+            </div>
 
-                {!isStreaming ? (
-                  <>
-                    <button onClick={handleStart} disabled={!canStart || scheduleActive}
-                      className="w-full py-4 rounded-xl font-bold text-sm text-black accent-bg transition-all disabled:opacity-30 disabled:cursor-not-allowed accent-glow">
-                      {startM.isPending ? "Iniciando…" : usePlaylistMode && playlist.length > 1 ? `🔴 Iniciar Playlist (${playlist.length} vídeos)` : "🔴 Iniciar Loop Infinito"}
-                    </button>
-                    {!canStart && !scheduleActive && (
-                      <div className="mt-3 text-center">
-                        {!selectedVideo && <p className="text-xs text-white/20">① Faça upload e selecione um vídeo</p>}
-                        {selectedVideo && !streamKey.trim() && <p className="text-xs text-white/20">② Digite sua stream key</p>}
+            {/* Right: Status + controls */}
+            <div className="space-y-5">
+              {/* Status card */}
+              <div className="card p-5">
+                {isStreaming ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-10 h-10 rounded-full accent-bg flex items-center justify-center accent-glow">
+                        <svg className="w-5 h-5 fill-white" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                        <div className="absolute -inset-1 rounded-full accent-bg opacity-20 live-ring" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-lg">{isPaused ? "⏸ Pausado" : "🔴 Ao Vivo"}</p>
+                        <p className="text-sm text-white/40">{elapsed}</p>
+                      </div>
+                    </div>
+                    {status?.videoFile && (
+                      <p className="text-xs text-white/30 truncate">▶ {status.videoFile}</p>
+                    )}
+                    {status?.loopMode === "playlist" && (
+                      <p className="text-xs text-white/25">📋 Vídeo {(status.playlistIndex ?? 0) + 1}/{status.playlist?.length ?? 1} da playlist</p>
+                    )}
+                    {status?.error && (
+                      <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">⚠️ {status.error}</p>
+                    )}
+                    {restartCountdown !== null && (
+                      <p className="text-xs text-amber-400">♻️ Reiniciando em {restartCountdown}s…</p>
+                    )}
+                    <div className="flex gap-2">
+                      {isPaused ? (
+                        <button onClick={() => resumeM.mutate()} disabled={resumeM.isPending}
+                          className="flex-1 py-3 rounded-xl font-bold accent-bg text-black disabled:opacity-40">
+                          ▶ Retomar
+                        </button>
+                      ) : (
+                        <button onClick={() => pauseM.mutate()} disabled={pauseM.isPending}
+                          className="flex-1 py-3 rounded-xl font-semibold btn-ghost">
+                          ⏸ Pausar
+                        </button>
+                      )}
+                      <button onClick={() => stopM.mutate()} disabled={stopM.isPending}
+                        className="flex-1 py-3 rounded-xl font-semibold text-red-400 border border-red-500/20 hover:bg-red-500/10 transition-colors">
+                        ⏹ Parar
+                      </button>
+                    </div>
+                    {serverPlaylist.length > 1 && (
+                      <div className="pt-2 border-t border-white/[0.05]">
+                        <p className="text-[11px] text-white/25 mb-2">Fila da playlist</p>
+                        {serverPlaylist.map((f, i) => (
+                          <div key={i} className={`flex items-center gap-2 py-1 text-xs ${i === serverPlaylistIndex ? "accent-text font-semibold" : "text-white/30"}`}>
+                            {i === serverPlaylistIndex ? "▶" : <span className="w-3">{i + 1}</span>}
+                            <span className="truncate">{f}</span>
+                          </div>
+                        ))}
                       </div>
                     )}
-                  </>
-                ) : (
-                  <div className="p-3 rounded-xl text-center" style={{ background: `rgba(${accentRgb},0.06)`, border: `1px solid rgba(${accentRgb},0.15)` }}>
-                    <p className="text-xs accent-text font-semibold">{isPaused ? "⏸ Pausado — tela preta no YouTube" : "🔴 Transmitindo ao vivo"}</p>
-                    <p className="text-[11px] text-white/25 mt-0.5">Use os controles no card de status</p>
                   </div>
-                )}
-
-                {startM.isError && (
-                  <p className="text-xs text-red-400 mt-3 text-center">
-                    {(startM.error as { data?: { error?: string } })?.data?.error ?? "Falha ao iniciar stream"}
-                  </p>
+                ) : (
+                  <div className="text-center py-6">
+                    <div className="w-14 h-14 rounded-2xl bg-white/[0.04] flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-7 h-7 fill-white/20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    </div>
+                    <p className="font-semibold text-white/60 mb-1">Pronto para ir ao vivo</p>
+                    <p className="text-xs text-white/25">Configure stream key e vídeo</p>
+                  </div>
                 )}
               </div>
 
               {/* Schedule */}
-              <div className="card p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-sm shrink-0" style={{ background: "rgba(255,255,255,0.06)" }}>⏰</span>
-                  <h2 className="font-bold text-sm">Agendar Live</h2>
-                </div>
-                {scheduleActive ? (
-                  <div className="space-y-3">
-                    <div className="rounded-xl p-4 text-center" style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.15)" }}>
-                      <p className="text-[11px] text-amber-500/60 mb-1">A live inicia em</p>
-                      <p className="text-3xl font-mono font-bold text-amber-400">{scheduleCountdown}</p>
-                    </div>
-                    <button onClick={() => { if (schedTimerRef.current) clearInterval(schedTimerRef.current); setScheduleActive(false); setScheduleCountdown(""); }}
-                      className="w-full py-2.5 rounded-xl text-sm font-semibold btn-ghost">
-                      Cancelar
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-xs text-white/25">Define um horário para iniciar automaticamente</p>
-                    <div className="flex gap-2">
-                      <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)}
-                        className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
-                        style={{ colorScheme: "dark" }} />
-                      <button onClick={handleSchedule} disabled={!scheduleTime || !canStart}
-                        className="px-4 py-2.5 rounded-xl text-sm font-bold text-black accent-bg disabled:opacity-30 whitespace-nowrap">
+              {!isStreaming && (
+                <div className="card p-5">
+                  <h3 className="font-bold text-sm mb-3">⏰ Agendar Início</h3>
+                  <div className="flex gap-2">
+                    <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)}
+                      disabled={scheduleActive}
+                      className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none disabled:opacity-40" />
+                    {scheduleActive ? (
+                      <button onClick={() => { setScheduleActive(false); setScheduleCountdown(""); if (schedTimerRef.current) clearInterval(schedTimerRef.current); }}
+                        className="px-4 py-2.5 rounded-xl text-sm font-bold text-red-400 border border-red-500/20">
+                        Cancelar {scheduleCountdown}
+                      </button>
+                    ) : (
+                      <button onClick={handleSchedule} disabled={!scheduleTime || !streamKey.trim() || !selectedVideo}
+                        className="px-4 py-2.5 rounded-xl text-sm font-bold btn-ghost disabled:opacity-30">
                         Agendar
                       </button>
-                    </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {/* Start button */}
+              {!isStreaming && (
+                <button onClick={handleStart} disabled={!canStart}
+                  className="w-full py-4 rounded-2xl text-base font-bold text-black accent-bg accent-glow transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+                  {startM.isPending ? "Iniciando…" : "🔴 Iniciar Live"}
+                </button>
+              )}
+              {startM.isError && (
+                <p className="text-xs text-red-400 text-center">
+                  {(startM.error as { data?: { error?: string } })?.data?.error ?? "Erro ao iniciar"}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -893,67 +929,30 @@ function StreamerApp() {
         {tab === "playlist" && (
           <div className="max-w-2xl mx-auto space-y-5">
             <div className="card p-5">
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="font-bold">📋 Playlist</h2>
-                {playlist.length > 0 && (
-                  <button onClick={() => { setPlaylist([]); if (isStreaming) playlistM.mutate({ data: { playlist: [] } }); }}
-                    className="text-xs text-white/25 hover:text-red-400 transition-colors">
-                    Limpar tudo
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-white/30 mb-5">
-                Os vídeos tocam em sequência. Ao terminar o último, volta ao primeiro.
-                {isStreaming && " Alterações aplicadas imediatamente."}
-              </p>
-
+              <h2 className="font-bold mb-1">📋 Playlist</h2>
+              <p className="text-xs text-white/30 mb-5">Adicione vídeos, reordene, e o servidor avança automaticamente.</p>
               {playlist.length === 0 ? (
-                <div className="text-center py-10">
-                  <p className="text-4xl mb-3">🎬</p>
-                  <p className="text-sm text-white/30">Nenhum vídeo na playlist</p>
-                  <p className="text-xs text-white/20 mt-1">Adicione vídeos usando o botão ＋ na aba Stream</p>
-                  <button onClick={() => setTab("stream")}
-                    className="mt-4 px-4 py-2 rounded-xl text-sm font-semibold btn-ghost text-white/50">
-                    ← Ir para Stream
-                  </button>
+                <div className="text-center py-10 text-white/20">
+                  <p className="text-3xl mb-3">📋</p>
+                  <p className="text-sm">Adicione vídeos pela aba <strong>Stream</strong></p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {playlist.map((filename, idx) => {
-                    const video = videos?.find((v) => v.filename === filename);
-                    const isCurrent = isStreaming && serverPlaylist[serverPlaylistIndex] === filename;
+                  {playlist.map((fn, i) => {
+                    const v = videos.find((vi) => vi.filename === fn);
+                    const isActive = isStreaming && serverPlaylist[serverPlaylistIndex] === fn;
                     return (
-                      <div key={`${filename}-${idx}`}
-                        className={`playlist-item flex items-center gap-3 px-4 py-3 ${isCurrent ? "active" : ""}`}>
-                        <span className="text-xs font-mono text-white/20 w-5 shrink-0">{idx + 1}</span>
-                        <div className={`w-7 h-7 rounded-lg shrink-0 flex items-center justify-center ${isCurrent ? "accent-bg" : "bg-white/[0.04]"}`}>
-                          {isCurrent
-                            ? <span className="text-black text-xs">▶</span>
-                            : <svg className="w-3 h-3 fill-white/20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                          }
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-xs font-medium truncate ${isCurrent ? "text-white" : "text-white/60"}`}>
-                            {video?.originalName ?? filename}
-                          </p>
-                          {video && <p className="text-[10px] text-white/20 mt-0.5">{formatBytes(video.size)}</p>}
-                          {isCurrent && <p className="text-[10px] accent-text mt-0.5">▶ Tocando agora</p>}
-                        </div>
-                        {/* Move up/down */}
+                      <div key={fn} className={`playlist-item flex items-center gap-3 p-3 ${isActive ? "active" : ""}`}>
                         <div className="flex flex-col gap-0.5">
-                          <button onClick={() => idx > 0 && moveInPlaylist(idx, idx - 1)}
-                            disabled={idx === 0}
-                            className="w-6 h-5 rounded text-white/20 hover:text-white/60 disabled:opacity-20 flex items-center justify-center btn-ghost">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                          </button>
-                          <button onClick={() => idx < playlist.length - 1 && moveInPlaylist(idx, idx + 1)}
-                            disabled={idx === playlist.length - 1}
-                            className="w-6 h-5 rounded text-white/20 hover:text-white/60 disabled:opacity-20 flex items-center justify-center btn-ghost">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                          </button>
+                          <button onClick={() => i > 0 && moveInPlaylist(i, i - 1)} disabled={i === 0} className="text-white/20 hover:text-white/60 disabled:opacity-0 text-xs">▲</button>
+                          <button onClick={() => i < playlist.length - 1 && moveInPlaylist(i, i + 1)} disabled={i === playlist.length - 1} className="text-white/20 hover:text-white/60 disabled:opacity-0 text-xs">▼</button>
                         </div>
-                        <button onClick={() => removeFromPlaylist(idx)}
-                          className="w-7 h-7 rounded-lg btn-ghost flex items-center justify-center text-white/15 hover:text-red-400 transition-colors">
+                        <span className="text-xs text-white/20 w-5 text-center">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{v?.originalName ?? fn}</p>
+                          {isActive && <p className="text-[10px] accent-text font-semibold">▶ Tocando agora</p>}
+                        </div>
+                        <button onClick={() => removeFromPlaylist(i)} className="text-white/15 hover:text-red-400 transition-colors p-1">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                           </svg>
@@ -966,37 +965,90 @@ function StreamerApp() {
             </div>
 
             {/* Add from library */}
-            {videos && videos.length > 0 && (
+            {videos.filter((v) => !playlist.includes(v.filename)).length > 0 && (
               <div className="card p-5">
-                <h3 className="font-bold text-sm mb-3">Adicionar à playlist</h3>
+                <h3 className="font-bold text-sm mb-3">+ Adicionar da biblioteca</h3>
                 <div className="space-y-2">
-                  {videos.map((v) => {
-                    const inPlaylist = playlist.includes(v.filename);
-                    return (
-                      <div key={v.filename} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-white/[0.05]">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-white/60 truncate">{v.originalName}</p>
-                          <p className="text-[10px] text-white/20">{formatBytes(v.size)}</p>
-                        </div>
-                        <button onClick={() => inPlaylist ? removeFromPlaylist(playlist.indexOf(v.filename)) : addToPlaylist(v.filename)}
-                          className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${inPlaylist ? "text-red-400 btn-ghost hover:bg-red-400/10" : "text-black accent-bg"}`}>
-                          {inPlaylist ? "Remover" : "+ Adicionar"}
-                        </button>
-                      </div>
-                    );
-                  })}
+                  {videos.filter((v) => !playlist.includes(v.filename)).map((v) => (
+                    <div key={v.filename} className="flex items-center gap-3 p-2">
+                      <div className="flex-1 min-w-0"><p className="text-xs truncate text-white/50">{v.originalName}</p></div>
+                      <button onClick={() => addToPlaylist(v.filename)} className="px-3 py-1.5 rounded-lg text-xs font-bold accent-bg text-black">+ Adicionar</button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
+          </div>
+        )}
 
-            {/* Use playlist tip */}
-            {playlist.length > 1 && !isStreaming && (
-              <div className="p-4 rounded-2xl text-sm" style={{ background: `rgba(${accentRgb},0.08)`, border: `1px solid rgba(${accentRgb},0.15)` }}>
-                <p className="accent-text font-semibold mb-1">✅ Playlist pronta!</p>
-                <p className="text-white/40 text-xs">Vá para a aba Stream, ative o modo Playlist e clique em Iniciar.</p>
-                <button onClick={() => setTab("stream")} className="mt-2 text-xs accent-text underline underline-offset-2">Ir para Stream →</button>
+        {/* ══════════════ TAB: MINHAS LIVES (SESSIONS) ══════════════ */}
+        {tab === "sessions" && (
+          <div className="space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-bold text-lg">📡 Minhas Lives</h2>
+                <p className="text-xs text-white/30 mt-0.5">Gerencie múltiplas lives simultâneas em canais diferentes</p>
+              </div>
+              <button onClick={() => setShowNewSession(!showNewSession)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-black accent-bg">
+                <span className="text-lg leading-none">+</span> Nova Live
+              </button>
+            </div>
+
+            {/* Create session form */}
+            {showNewSession && (
+              <div className="card p-5 fade-in">
+                <h3 className="font-bold text-sm mb-3">Criar nova sessão de live</h3>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newSessionName.trim()) createSessionM.mutate({ data: { name: newSessionName.trim() } });
+                }} className="flex gap-2">
+                  <input autoFocus value={newSessionName} onChange={(e) => setNewSessionName(e.target.value)}
+                    placeholder='Ex: "Live de Minecraft", "Canal Gaming"…'
+                    className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none" />
+                  <button type="submit" disabled={!newSessionName.trim() || createSessionM.isPending}
+                    className="px-4 py-2.5 rounded-xl text-sm font-bold text-black accent-bg disabled:opacity-30 whitespace-nowrap">
+                    {createSessionM.isPending ? "Criando…" : "Criar"}
+                  </button>
+                  <button type="button" onClick={() => setShowNewSession(false)}
+                    className="px-4 py-2.5 rounded-xl text-sm btn-ghost">Cancelar</button>
+                </form>
               </div>
             )}
+
+            {/* Session cards */}
+            {sessions.length === 0 ? (
+              <div className="card p-12 text-center">
+                <p className="text-4xl mb-4">📡</p>
+                <p className="text-white/40">Nenhuma sessão encontrada</p>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-5">
+                {sessions.map((s) => (
+                  <SessionCard key={s.id} session={s} videos={videos} onInvalidate={() => { invSessions(); inv(); }} />
+                ))}
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="card p-5">
+              <h3 className="font-bold text-sm mb-3">💡 Como usar múltiplas lives</h3>
+              <ul className="space-y-2.5">
+                {[
+                  "Crie uma sessão para cada canal do YouTube (ex: Canal Gaming, Canal Minecraft)",
+                  "Cada sessão tem sua própria stream key — uma para cada canal",
+                  "Todas as lives rodam ao mesmo tempo no servidor",
+                  "Você pode pausar/retomar/parar cada live de forma independente",
+                  "Quando parar uma live, pode deletar a sessão clicando no ✕",
+                ].map((t, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <span className="step-num w-5 h-5 rounded-full text-[10px] flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                    <p className="text-xs text-white/40">{t}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
 
@@ -1006,74 +1058,101 @@ function StreamerApp() {
             <div className="card p-5">
               <h2 className="font-bold mb-1">📥 Importar do YouTube</h2>
               <p className="text-xs text-white/30 mb-5">
-                Cole a URL de um canal, playlist ou vídeo. O servidor baixa diretamente — sem precisar de login Google.
+                Cole a URL de um canal, playlist ou vídeo. Sem precisar de login Google.
               </p>
 
-              <div className="space-y-3">
-                <input type="url" value={channelUrl}
-                  onChange={(e) => setChannelUrl(e.target.value)}
-                  placeholder="https://www.youtube.com/@MeuCanal ou /watch?v=..."
-                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/15 focus:outline-none"
-                />
-                <button onClick={() => importListM.mutate({ data: { url: channelUrl } })}
+              <div className="space-y-4">
+                {/* URL input */}
+                <input type="url" value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/@MeuCanal"
+                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/15 focus:outline-none" />
+
+                {/* Limit slider */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs font-semibold text-white/40">Quantidade de vídeos</p>
+                    <span className="text-sm font-bold accent-text">{importLimit}</span>
+                  </div>
+                  <input type="range" min={1} max={50} value={importLimit}
+                    onChange={(e) => setImportLimit(Number(e.target.value))} className="w-full" />
+                  <div className="flex justify-between text-[10px] text-white/20">
+                    <span>1</span><span>50</span>
+                  </div>
+                </div>
+
+                {/* Sort order */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-white/40">Ordenar por</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([["newest", "🆕 Mais recentes"], ["oldest", "📅 Mais antigos"]] as const).map(([v, label]) => (
+                      <button key={v} onClick={() => setImportSort(v)}
+                        className={`py-2 rounded-xl text-xs font-semibold transition-all ${importSort === v ? "accent-bg text-black" : "btn-ghost text-white/50"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button onClick={() => importListM.mutate({ data: { url: channelUrl, limit: importLimit, sort: importSort } })}
                   disabled={!channelUrl.trim() || importListM.isPending}
                   className="w-full py-3 rounded-xl font-bold text-sm text-black accent-bg disabled:opacity-30">
                   {importListM.isPending ? "Buscando vídeos…" : "🔍 Buscar vídeos"}
                 </button>
+
                 {importListM.isError && (
-                  <p className="text-xs text-red-400">
-                    {(importListM.error as { data?: { error?: string } })?.data?.error ?? "Erro ao buscar. Verifique a URL e se o backend tem yt-dlp."}
-                  </p>
+                  <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                    <p className="font-bold mb-1">❌ Erro ao buscar</p>
+                    <p className="text-white/50">{(importListM.error as { data?: { error?: string } })?.data?.error ?? "Verifique a URL e aguarde o Railway recompilar com yt-dlp."}</p>
+                  </div>
                 )}
               </div>
             </div>
 
             {/* Results */}
-            {importListM.data && importListM.data.videos.length > 0 && (
-              <div className="card p-5">
-                <h3 className="font-bold text-sm mb-3">
-                  {importListM.data.videos.length} vídeo{importListM.data.videos.length !== 1 ? "s" : ""} encontrado{importListM.data.videos.length !== 1 ? "s" : ""}
-                </h3>
-                <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-                  {importListM.data.videos.map((v) => {
-                    const job = downloadJobs.find((j) => j.title === v.title);
-                    return (
-                      <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl border border-white/[0.05]">
-                        {v.thumbnail && (
-                          <img src={v.thumbnail} alt="" className="w-16 h-9 rounded-lg object-cover shrink-0 bg-white/5" loading="lazy" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-white/70 line-clamp-2 leading-snug">{v.title}</p>
-                          {v.duration && <p className="text-[10px] text-white/25 mt-0.5">{formatSeconds(v.duration)}</p>}
-                          {job && (
-                            <div className="mt-1.5">
-                              <ImportProgressPoller
-                                jobId={job.jobId}
-                                onDone={() => invVideos()}
-                              />
+            {importListM.data && (
+              <>
+                {importListM.data.channelName && (
+                  <p className="text-xs text-white/30 px-1">📺 {importListM.data.channelName} · {importListM.data.videos.length} vídeo{importListM.data.videos.length !== 1 ? "s" : ""}</p>
+                )}
+                {importListM.data.videos.length > 0 ? (
+                  <div className="card p-5">
+                    <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                      {importListM.data.videos.map((v) => {
+                        const job = downloadJobs.find((j) => j.title === v.title);
+                        return (
+                          <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl border border-white/[0.05]">
+                            {v.thumbnail && (
+                              <img src={v.thumbnail} alt="" className="w-20 h-11 rounded-lg object-cover shrink-0 bg-white/5" loading="lazy" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-white/70 line-clamp-2 leading-snug">{v.title}</p>
+                              {v.duration && <p className="text-[10px] text-white/25 mt-0.5">{formatSeconds(v.duration)}</p>}
+                              {job && (
+                                <div className="mt-1.5">
+                                  <ImportProgressPoller jobId={job.jobId} onDone={() => invVideos()} />
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        {!job && (
-                          <button onClick={() => importDownloadM.mutate({ data: { url: v.url, title: v.title } })}
-                            disabled={importDownloadM.isPending}
-                            className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-black accent-bg disabled:opacity-40 whitespace-nowrap">
-                            ⬇ Baixar
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {importListM.data && importListM.data.videos.length === 0 && (
-              <div className="card p-8 text-center">
-                <p className="text-3xl mb-3">🔍</p>
-                <p className="text-sm text-white/30">Nenhum vídeo encontrado nessa URL.</p>
-                <p className="text-xs text-white/20 mt-1">Tente a URL do canal principal ou de uma playlist pública.</p>
-              </div>
+                            {!job && (
+                              <button onClick={() => importDownloadM.mutate({ data: { url: v.url, title: v.title } })}
+                                disabled={importDownloadM.isPending}
+                                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-black accent-bg disabled:opacity-40 whitespace-nowrap">
+                                ⬇ Baixar
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="card p-8 text-center">
+                    <p className="text-3xl mb-3">🔍</p>
+                    <p className="text-sm text-white/30">Nenhum vídeo encontrado.</p>
+                    <p className="text-xs text-white/20 mt-1">Tente a URL do canal principal ou de uma playlist pública.</p>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Active downloads */}
@@ -1091,14 +1170,16 @@ function StreamerApp() {
               </div>
             )}
 
+            {/* How it works */}
             <div className="card p-5">
               <h3 className="font-bold text-sm mb-3">ℹ️ Como funciona</h3>
               <ul className="space-y-2.5">
                 {[
                   "Cole a URL de um canal (@MeuCanal), playlist ou vídeo individual",
-                  "Clique em Buscar — o servidor lista até 50 vídeos",
-                  "Clique em Baixar nos vídeos desejados",
-                  "Quando concluir, o vídeo aparece na aba Stream",
+                  "Ajuste a quantidade (1–50) e a ordem (recentes ou antigos)",
+                  "Clique em Buscar — o servidor lista os vídeos",
+                  "Clique em Baixar nos vídeos desejados — barra de progresso em tempo real",
+                  "Quando concluir, o vídeo aparece automaticamente na aba Stream",
                   "Funciona com canais públicos — sem precisar de login",
                 ].map((s, i) => (
                   <li key={i} className="flex items-start gap-2.5">
@@ -1107,6 +1188,10 @@ function StreamerApp() {
                   </li>
                 ))}
               </ul>
+              <div className="mt-4 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                <p className="text-xs text-amber-400 font-semibold mb-1">⚠️ yt-dlp e o Railway</p>
+                <p className="text-xs text-white/30">O yt-dlp é instalado via Dockerfile. Se o Railway ainda não recompilou após nossa última atualização, aguarde alguns minutos. O erro mostrará "yt-dlp não está disponível" se for esse o caso.</p>
+              </div>
             </div>
           </div>
         )}
