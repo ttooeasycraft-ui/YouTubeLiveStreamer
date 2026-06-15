@@ -91,7 +91,7 @@ function fmtCountdown(ms: number) {
   return `${Math.floor(s / 3600).toString().padStart(2, "0")}:${Math.floor((s % 3600) / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 }
 
-type Tab = "stream" | "playlist" | "import" | "sessions";
+type Tab = "stream" | "playlist" | "import" | "sessions" | "bot" | "editor";
 
 function VolumeIcon({ level }: { level: number }) {
   if (level === 0) return (
@@ -675,6 +675,8 @@ function StreamerApp() {
             ["playlist", "📋 Playlist"],
             ["sessions", `📡 Minhas Lives${activeLives > 0 ? ` (${activeLives})` : ""}`],
             ["import", "📥 Importar"],
+            ["bot", "🤖 EzBot"],
+            ["editor", "🎨 Editor ao Vivo"],
           ] as [Tab, string][]).map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${tab === t ? "tab-active" : "tab-inactive hover:text-white/50"}`}>
@@ -1315,6 +1317,8 @@ function StreamerApp() {
             </div>
           </div>
         )}
+        {tab === "bot" && <BotPanel accent={accent} />}
+        {tab === "editor" && <EditorPanel accent={accent} />}
       </main>
 
       <footer className="border-t border-white/[0.04] py-6 text-center mt-8">
@@ -1323,6 +1327,9 @@ function StreamerApp() {
     </div>
   );
 }
+
+import BotPanel from "./pages/BotPanel";
+import EditorPanel from "./pages/EditorPanel";
 
 export default function App() {
   return (
