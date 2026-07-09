@@ -91,7 +91,15 @@ function fmtCountdown(ms: number) {
   return `${Math.floor(s / 3600).toString().padStart(2, "0")}:${Math.floor((s % 3600) / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 }
 
-type Tab = "stream" | "playlist" | "import" | "sessions" | "bot" | "editor";
+type Tab = "stream" | "playlist" | "import" | "sessions" | "packs";
+type StreamPlatform = "youtube" | "tiktok" | "twitch" | "instagram";
+
+const PLATFORM_LABELS: Record<StreamPlatform, string> = {
+  youtube: "▶ YouTube",
+  tiktok: "♪ TikTok",
+  twitch: "🎮 Twitch",
+  instagram: "📷 Instagram",
+};
 
 function VolumeIcon({ level }: { level: number }) {
   if (level === 0) return (
@@ -154,6 +162,7 @@ function SessionCard({ session, videos, onInvalidate }: {
   const [showKey, setShowKey] = useState(false);
   const [selVideo, setSelVideo] = useState(session.videoFile ?? "");
   const [fmt, setFmt] = useState<"landscape" | "shorts">("landscape");
+  const [platformSel, setPlatformSel] = useState<StreamPlatform>("youtube");
   const [vol, setVol] = useState(session.volume);
   const [elapsed, setElapsed] = useState("00:00:00");
 
@@ -181,9 +190,12 @@ function SessionCard({ session, videos, onInvalidate }: {
   const isDefault = session.id === "default";
   const live = session.isStreaming;
   const paused = session.isPaused;
+  const sess = session as SessionState & { isStable?: boolean; stabilizingSecondsLeft?: number | null; platform?: string };
+  const isStable = sess.isStable ?? true;
+  const stabilizingLeft = sess.stabilizingSecondsLeft ?? null;
 
-  const statusColor = live && !paused ? "text-red-400" : live && paused ? "text-amber-400" : "text-white/25";
-  const statusLabel = live && !paused ? `● LIVE · ${elapsed}` : live && paused ? "⏸ PAUSADO" : "● PARADO";
+  const statusColor = live && !paused && isStable ? "text-red-400" : live && !paused && !isStable ? "text-amber-400" : live && paused ? "text-amber-400" : "text-white/25";
+  const statusLabel = live && !paused && isStable ? `● LIVE · ${elapsed}` : live && !paused && !isStable ? `⏳ Estabilizando… ${stabilizingLeft ?? ""}s` : live && paused ? "⏸ PAUSADO" : "● PARADO";
 
   return (
     <div className="card p-5 fade-in space-y-4">
@@ -267,6 +279,13 @@ function SessionCard({ session, videos, onInvalidate }: {
             </div>
           )}
 
+          {/* Stabilizing warning */}
+          {live && !paused && !isStable && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 text-xs text-amber-400">
+              ⏳ Aguardando estabilidade por {stabilizingLeft ?? "…"}s antes de habilitar controles de pausa.
+            </div>
+          )}
+
           {/* Action buttons */}
           <div className="flex gap-2">
             {paused ? (
@@ -277,8 +296,9 @@ function SessionCard({ session, videos, onInvalidate }: {
               </button>
             ) : (
               <button onClick={() => pauseM.mutate({ sessionId: session.id })}
-                disabled={pauseM.isPending}
-                className="flex-1 py-2 rounded-xl text-sm font-semibold btn-ghost">
+                disabled={pauseM.isPending || !isStable}
+                title={!isStable ? "Aguarde a stream estabilizar (20s)" : undefined}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold btn-ghost disabled:opacity-30">
                 ⏸ Pausar
               </button>
             )}
@@ -301,9 +321,19 @@ function SessionCard({ session, videos, onInvalidate }: {
             </button>
           ) : (
             <div className="space-y-3 card-inner p-4">
+              {/* Platform selector */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {(Object.keys(PLATFORM_LABELS) as StreamPlatform[]).map((p) => (
+                  <button key={p} onClick={() => setPlatformSel(p)}
+                    className={`py-2 rounded-xl text-xs font-semibold transition-all ${platformSel === p ? "accent-bg text-black" : "btn-ghost text-white/40"}`}>
+                    {PLATFORM_LABELS[p]}
+                  </button>
+                ))}
+              </div>
+
               <div className="relative">
                 <input type={showKey ? "text" : "password"} value={sk} onChange={(e) => setSk(e.target.value)}
-                  placeholder="Stream Key do YouTube"
+                  placeholder={`Stream Key — ${PLATFORM_LABELS[platformSel]}`}
                   className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none pr-12" />
                 <button type="button" onClick={() => setShowKey(!showKey)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 text-xs">
@@ -337,11 +367,11 @@ function SessionCard({ session, videos, onInvalidate }: {
               <div className="flex gap-2">
                 <button onClick={() => {
                   if (!sk.trim() || !selVideo) return;
-                  startM.mutate({ sessionId: session.id, data: { streamKey: sk.trim(), videoFile: selVideo, format: fmt, volume: vol } });
+                  startM.mutate({ sessionId: session.id, data: { streamKey: sk.trim(), videoFile: selVideo, format: fmt, volume: vol, platform: platformSel } as Parameters<typeof startM.mutate>[0]["data"] });
                 }}
                   disabled={!sk.trim() || !selVideo || startM.isPending}
                   className="flex-1 py-2.5 rounded-xl text-sm font-bold text-black accent-bg disabled:opacity-30">
-                  {startM.isPending ? "Iniciando…" : "🔴 Ir ao Vivo"}
+                  {startM.isPending ? "Iniciando…" : `🔴 Ir ao Vivo · ${PLATFORM_LABELS[platformSel]}`}
                 </button>
                 <button onClick={() => setShowStart(false)} className="px-4 py-2.5 rounded-xl text-sm btn-ghost">
                   Cancelar
@@ -385,6 +415,7 @@ function StreamerApp() {
   const [restartCountdown, setRestartCountdown] = useState<number | null>(null);
   const [testingConn, setTestingConn] = useState(false);
   const [connResult, setConnResult] = useState<"ok" | "fail" | null>(null);
+  const [platform, setPlatform] = useState<StreamPlatform>("youtube");
 
   // Playlist
   const [playlist, setPlaylist] = useState<string[]>([]);
@@ -473,6 +504,9 @@ function StreamerApp() {
   const serverVolume = status?.volume ?? 100;
   const serverPlaylist = status?.playlist ?? [];
   const serverPlaylistIndex = status?.playlistIndex ?? 0;
+  const statusExt = status as (typeof status & { isStable?: boolean; stabilizingSecondsLeft?: number | null }) | undefined;
+  const isStable = statusExt?.isStable ?? true;
+  const mainStabilizingLeft = statusExt?.stabilizingSecondsLeft ?? null;
 
   const startTimer = useCallback((at: string) => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -546,8 +580,8 @@ function StreamerApp() {
   function handleStart() {
     if (!streamKey.trim() || !selectedVideo) return;
     const pl = usePlaylistMode && playlist.length > 1 ? playlist : [];
-    const p = { streamKey: streamKey.trim(), videoFile: selectedVideo, format, volume, playlist: pl };
-    lastParams.current = p; startM.mutate({ data: p });
+    const p = { streamKey: streamKey.trim(), videoFile: selectedVideo, format, volume, playlist: pl, platform };
+    lastParams.current = p as typeof lastParams.current; startM.mutate({ data: p as Parameters<typeof startM.mutate>[0]["data"] });
   }
 
   async function handleDuploStart() {
@@ -675,8 +709,7 @@ function StreamerApp() {
             ["playlist", "📋 Playlist"],
             ["sessions", `📡 Minhas Lives${activeLives > 0 ? ` (${activeLives})` : ""}`],
             ["import", "📥 Importar"],
-            ["bot", "🤖 EzBot"],
-            ["editor", "🎨 Editor ao Vivo"],
+            ["packs", "📦 Packs"],
           ] as [Tab, string][]).map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap transition-all ${tab === t ? "tab-active" : "tab-inactive hover:text-white/50"}`}>
@@ -891,8 +924,19 @@ function StreamerApp() {
               <div className="card p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">3</span>
-                  <h2 className="font-bold text-sm">Formato & Áudio</h2>
+                  <h2 className="font-bold text-sm">Plataforma, Formato & Áudio</h2>
                 </div>
+                {/* Platform selector */}
+                {!duploMode && (
+                  <div className="grid grid-cols-2 gap-1.5 mb-3">
+                    {(Object.keys(PLATFORM_LABELS) as StreamPlatform[]).map((p) => (
+                      <button key={p} onClick={() => { if (!isStreaming) setPlatform(p); }} disabled={isStreaming}
+                        className={`py-2 rounded-xl text-xs font-semibold transition-all ${platform === p ? "accent-bg text-black" : "btn-ghost text-white/40"} disabled:opacity-40`}>
+                        {PLATFORM_LABELS[p]}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className={`grid gap-2 mb-4 ${duploMode ? "grid-cols-1" : "grid-cols-2"}`}>
                   {duploMode ? (
                     <div className="py-2.5 rounded-xl text-sm font-semibold text-center accent-bg text-black">
@@ -960,6 +1004,11 @@ function StreamerApp() {
                     {restartCountdown !== null && (
                       <p className="text-xs text-amber-400">♻️ Reiniciando em {restartCountdown}s…</p>
                     )}
+                    {isStreaming && !isPaused && !isStable && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 text-xs text-amber-400">
+                        ⏳ Estabilizando… {mainStabilizingLeft ?? ""}s — Pausar ficará disponível após estabilização.
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       {isPaused ? (
                         <button onClick={() => resumeM.mutate()} disabled={resumeM.isPending}
@@ -967,8 +1016,9 @@ function StreamerApp() {
                           ▶ Retomar
                         </button>
                       ) : (
-                        <button onClick={() => pauseM.mutate()} disabled={pauseM.isPending}
-                          className="flex-1 py-3 rounded-xl font-semibold btn-ghost">
+                        <button onClick={() => pauseM.mutate()} disabled={pauseM.isPending || !isStable}
+                          title={!isStable ? "Aguarde a stream estabilizar (20s)" : undefined}
+                          className="flex-1 py-3 rounded-xl font-semibold btn-ghost disabled:opacity-30">
                           ⏸ Pausar
                         </button>
                       )}
@@ -1100,6 +1150,71 @@ function StreamerApp() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ══════════════ TAB: PACKS ══════════════ */}
+        {tab === "packs" && (
+          <div className="max-w-2xl mx-auto space-y-5">
+            <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4">
+              <p className="text-sm font-bold text-amber-400 mb-1">⚠️ Aviso de Tráfego Intenso</p>
+              <p className="text-xs text-white/50 leading-relaxed">
+                Todos os 4 packs estão no Google Drive e exigem login para baixar. Sistema projetado para tráfego intenso com pacotes pesados de 1 GB a 10 GB. Use uma conexão estável e Wi-Fi para baixar.
+              </p>
+            </div>
+
+            {[
+              {
+                icon: "📽️",
+                title: "PACK SEPARADO",
+                description: "Recortes isolados e mídias avulsas.",
+                link: "https://drive.google.com/drive/folders/1LGgJkpPTATh2NyPSb4dfWpdiOiwlAfG6?usp=drive_link",
+                password: null,
+              },
+              {
+                icon: "📸",
+                title: "PACK COMPLETO (iGust)",
+                description: "Overlays de alta resolução, mídias e templates.",
+                link: "https://drive.google.com/file/d/1h99LD7bHO19vjfChBcSIdy6Qf_gRdczk/view",
+                password: "gustit",
+              },
+              {
+                icon: "📁",
+                title: "PACK DE MEMES E EFEITOS (João Dias Tech)",
+                description: "Áudios de memes virais, transições e efeitos visuais.",
+                link: "https://drive.google.com/file/d/1JrWqR14xX9idVFoPuFkdW_-4ClwkCYcY/view?usp=sharing",
+                password: null,
+              },
+              {
+                icon: "🎵",
+                title: "PACK DE MEZCLA / SOUND EFFECTS",
+                description: "Efeitos de som, batidas e trilhas limpas.",
+                link: "https://drive.google.com/drive/folders/1HCqd9TRGvktSj5T6Kd2V4DzzZA05sVq1?usp=drive_link",
+                password: "gustedit",
+              },
+            ].map((pack) => (
+              <div key={pack.title} className="card p-5 space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">{pack.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-sm leading-tight">{pack.title}</h3>
+                    <p className="text-xs text-white/40 mt-0.5">{pack.description}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {pack.password && (
+                    <div className="flex items-center gap-2 bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2">
+                      <span className="text-xs text-white/30">🔑 Senha:</span>
+                      <span className="text-sm font-bold font-mono tracking-widest accent-text select-all">{pack.password}</span>
+                    </div>
+                  )}
+                  <a href={pack.link} target="_blank" rel="noopener noreferrer"
+                    className="flex-1 min-w-[140px] py-2.5 rounded-xl text-sm font-bold text-black accent-bg text-center transition-all hover:brightness-110">
+                    ⬇ Baixar do Drive
+                  </a>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1317,8 +1432,6 @@ function StreamerApp() {
             </div>
           </div>
         )}
-        {tab === "bot" && <BotPanel accent={accent} />}
-        {tab === "editor" && <EditorPanel accent={accent} />}
       </main>
 
       <footer className="border-t border-white/[0.04] py-6 text-center mt-8">
@@ -1327,9 +1440,6 @@ function StreamerApp() {
     </div>
   );
 }
-
-import BotPanel from "./pages/BotPanel";
-import EditorPanel from "./pages/EditorPanel";
 
 export default function App() {
   return (
