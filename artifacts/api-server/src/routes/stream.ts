@@ -53,6 +53,7 @@ const uploadThumb = multer({
 
 type StreamFormat = "landscape" | "shorts";
 type LoopMode = "single" | "playlist";
+type StreamPlatform = "youtube" | "tiktok" | "twitch" | "instagram";
 
 interface Session {
   id: string;
@@ -64,6 +65,8 @@ interface Session {
   format: StreamFormat;
   volume: number;
   startedAt: string | null;
+  stableAt: string | null;
+  stableTimer: ReturnType<typeof setTimeout> | null;
   pausedAt: string | null;
   error: string | null;
   ffmpegLog: string[];
@@ -72,6 +75,43 @@ interface Session {
   playlistIndex: number;
   loopMode: LoopMode;
   createdAt: string;
+  platform: StreamPlatform;
+}
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+
+const STATE_FILE = path.join(process.cwd(), "stream-state.json");
+
+interface PersistedSession {
+  id: string;
+  name: string;
+  streamKey: string;
+  videoFile: string;
+  format: StreamFormat;
+  volume: number;
+  playlist: string[];
+  platform: StreamPlatform;
+}
+
+function saveState() {
+  try {
+    const active: PersistedSession[] = [];
+    for (const s of sessions.values()) {
+      if (s.isStreaming && !s.isPaused && s.streamKey && s.videoFile) {
+        active.push({
+          id: s.id, name: s.name,
+          streamKey: s.streamKey, videoFile: s.videoFile,
+          format: s.format, volume: s.volume,
+          playlist: s.playlist, platform: s.platform,
+        });
+      }
+    }
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ active, savedAt: new Date().toISOString() }, null, 2));
+  } catch { /* non-fatal */ }
+}
+
+function clearState() {
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify({ active: [], savedAt: new Date().toISOString() }, null, 2)); } catch { /* non-fatal */ }
 }
 
 interface DownloadJob {
@@ -94,10 +134,12 @@ function createSession(id: string, name: string): Session {
     isStreaming: false, isPaused: false,
     videoFile: null, streamKey: null,
     format: "landscape", volume: 100,
-    startedAt: null, pausedAt: null, error: null,
+    startedAt: null, stableAt: null, stableTimer: null,
+    pausedAt: null, error: null,
     ffmpegLog: [], process: null,
     playlist: [], playlistIndex: 0, loopMode: "single",
     createdAt: new Date().toISOString(),
+    platform: "youtube",
   };
   sessions.set(id, s);
   return s;
@@ -112,6 +154,10 @@ function getSession(id: string): Session | undefined {
 }
 
 function publicSession(s: Session) {
+  const isStable = s.stableAt !== null;
+  const stabilizingSince = !isStable && s.startedAt && s.isStreaming
+    ? Math.max(0, 20 - Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 1000))
+    : null;
   return {
     id: s.id,
     name: s.name,
@@ -122,6 +168,9 @@ function publicSession(s: Session) {
     format: s.format,
     volume: s.volume,
     startedAt: s.startedAt,
+    stableAt: s.stableAt,
+    isStable,
+    stabilizingSecondsLeft: stabilizingSince,
     pausedAt: s.pausedAt,
     error: s.error,
     ffmpegLog: s.ffmpegLog.slice(-20),
@@ -129,7 +178,20 @@ function publicSession(s: Session) {
     playlistIndex: s.playlistIndex,
     loopMode: s.loopMode,
     createdAt: s.createdAt,
+    platform: s.platform,
   };
+}
+
+// ── RTMP URL builder ──────────────────────────────────────────────────────────
+
+function buildRtmpUrl(platform: StreamPlatform, streamKey: string): string {
+  switch (platform) {
+    case "tiktok":    return `rtmp://push.live-video.net/app/${streamKey}`;
+    case "twitch":    return `rtmp://live.twitch.tv/app/${streamKey}`;
+    case "instagram": return `rtmps://live-upload.instagram.com:443/rtmp/${streamKey}`;
+    case "youtube":
+    default:          return `rtmp://x.rtmp.youtube.com/live2/${streamKey}`;
+  }
 }
 
 // ── FFmpeg helpers ────────────────────────────────────────────────────────────
@@ -236,7 +298,11 @@ function startVideoProcess(s: Session, filePath: string, rtmpUrl: string, isPlay
   });
 }
 
-function doStart(s: Session, body: { streamKey: string; videoFile: string; format?: string; volume?: number; playlist?: string[] }): string | null {
+function clearStableTimer(s: Session) {
+  if (s.stableTimer) { clearTimeout(s.stableTimer); s.stableTimer = null; }
+}
+
+function doStart(s: Session, body: { streamKey: string; videoFile: string; format?: string; volume?: number; playlist?: string[]; platform?: string }): string | null {
   if (s.isStreaming) return "Já existe uma live ativa nesta sessão. Pare a atual antes de iniciar.";
   const filePath = path.join(UPLOADS_DIR, body.videoFile);
   if (!fs.existsSync(filePath)) return "Arquivo de vídeo não encontrado. Faça o upload primeiro.";
@@ -245,26 +311,41 @@ function doStart(s: Session, body: { streamKey: string; videoFile: string; forma
   const vol = Math.max(0, Math.min(100, Number(body.volume) || 100));
   const playlist = Array.isArray(body.playlist) && body.playlist.length > 1 ? body.playlist : [];
   const isPlaylist = playlist.length > 1;
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${body.streamKey}`;
+  const platform = (["youtube","tiktok","twitch","instagram"].includes(body.platform ?? "") ? body.platform : "youtube") as StreamPlatform;
+  const rtmpUrl = buildRtmpUrl(platform, body.streamKey);
 
+  clearStableTimer(s);
   s.isStreaming = true; s.isPaused = false;
   s.videoFile = body.videoFile; s.streamKey = body.streamKey;
-  s.format = fmt; s.volume = vol;
-  s.startedAt = new Date().toISOString(); s.pausedAt = null; s.error = null; s.ffmpegLog = [];
+  s.format = fmt; s.volume = vol; s.platform = platform;
+  s.startedAt = new Date().toISOString(); s.stableAt = null; s.pausedAt = null; s.error = null; s.ffmpegLog = [];
   s.loopMode = isPlaylist ? "playlist" : "single";
   s.playlist = isPlaylist ? playlist : [];
   s.playlistIndex = isPlaylist ? Math.max(0, playlist.indexOf(body.videoFile)) : 0;
 
   startVideoProcess(s, filePath, rtmpUrl, isPlaylist);
+
+  // Mark stable after 20 seconds of continuous streaming
+  s.stableTimer = setTimeout(() => {
+    if (s.isStreaming && !s.isPaused) {
+      s.stableAt = new Date().toISOString();
+      saveState();
+    }
+    s.stableTimer = null;
+  }, 20000);
+
   return null;
 }
 
 function doStop(s: Session): string | null {
   if (!s.isStreaming || !s.process) return "Nenhuma live ativa nesta sessão.";
   const proc = s.process;
+  clearStableTimer(s);
   s.isStreaming = false; s.isPaused = false; s.process = null; s.error = null; s.pausedAt = null;
+  s.stableAt = null;
   s.playlist = []; s.playlistIndex = 0; s.loopMode = "single";
   killProcess(proc);
+  saveState();
   return null;
 }
 
@@ -272,29 +353,37 @@ function doPause(s: Session): string | null {
   if (!s.isStreaming || !s.process) return "Nenhuma live ativa.";
   if (s.isPaused) return "Live já está pausada.";
   const proc = s.process;
+  clearStableTimer(s);
   s.isPaused = true; s.pausedAt = new Date().toISOString(); s.process = null;
   killProcess(proc);
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  const rtmpUrl = buildRtmpUrl(s.platform, s.streamKey!);
   s.process = spawnFfmpeg(s, buildPauseArgs(rtmpUrl, s.format), (code) => {
     if (!s.isPaused) return;
     s.isStreaming = false; s.isPaused = false; s.process = null;
     if (code !== 0) s.error = "Conexão pausada perdida. Reinicie a live.";
+    saveState();
   });
+  saveState();
   return null;
 }
 
 function doResume(s: Session): string | null {
   if (!s.isStreaming || !s.isPaused) return "Nenhuma live pausada.";
   const proc = s.process;
-  s.isPaused = false; s.pausedAt = null; s.process = null;
+  s.isPaused = false; s.pausedAt = null; s.stableAt = null; s.process = null;
   if (proc) killProcess(proc);
   const filePath = path.join(UPLOADS_DIR, s.videoFile ?? "");
   if (!s.videoFile || !fs.existsSync(filePath)) {
     s.isStreaming = false; s.error = "Arquivo de vídeo não encontrado. Faça upload novamente.";
     return s.error;
   }
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  const rtmpUrl = buildRtmpUrl(s.platform, s.streamKey!);
   startVideoProcess(s, filePath, rtmpUrl, s.loopMode === "playlist");
+  // Restart stability timer after resume
+  s.stableTimer = setTimeout(() => {
+    if (s.isStreaming && !s.isPaused) { s.stableAt = new Date().toISOString(); saveState(); }
+    s.stableTimer = null;
+  }, 20000);
   return null;
 }
 
@@ -309,7 +398,7 @@ function doVolume(s: Session, vol: number): string | null {
     s.isStreaming = false; s.error = "Arquivo não encontrado.";
     return s.error;
   }
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
+  const rtmpUrl = buildRtmpUrl(s.platform, s.streamKey!);
   startVideoProcess(s, filePath, rtmpUrl, s.loopMode === "playlist");
   return null;
 }
@@ -319,9 +408,9 @@ function doSwitchVideo(s: Session, videoFile: string): string | null {
   const filePath = path.join(UPLOADS_DIR, videoFile);
   if (!filePath.startsWith(UPLOADS_DIR) || !fs.existsSync(filePath)) return "Arquivo não encontrado.";
   const proc = s.process; s.process = null; s.videoFile = videoFile;
+  const rtmpUrl = buildRtmpUrl(s.platform, s.streamKey!);
   if (s.isPaused) {
     if (proc) killProcess(proc);
-    const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
     s.process = spawnFfmpeg(s, buildPauseArgs(rtmpUrl, s.format), (code) => {
       if (!s.isPaused) return;
       s.isStreaming = false; s.isPaused = false; s.process = null;
@@ -330,10 +419,41 @@ function doSwitchVideo(s: Session, videoFile: string): string | null {
     return null;
   }
   if (proc) killProcess(proc);
-  const rtmpUrl = `rtmp://x.rtmp.youtube.com/live2/${s.streamKey}`;
   startVideoProcess(s, filePath, rtmpUrl, s.loopMode === "playlist");
   return null;
 }
+
+// ── Auto-restore ──────────────────────────────────────────────────────────────
+
+function autoRestoreState() {
+  if (!fs.existsSync(STATE_FILE)) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8")) as { active?: PersistedSession[] };
+    if (!Array.isArray(raw.active) || raw.active.length === 0) return;
+    // Delay 3 seconds to let server fully initialize
+    setTimeout(() => {
+      for (const p of raw.active!) {
+        const videoPath = path.join(UPLOADS_DIR, p.videoFile);
+        if (!fs.existsSync(videoPath)) continue;
+        let s = sessions.get(p.id);
+        if (!s) s = createSession(p.id, p.name || "Sessão Restaurada");
+        if (s.isStreaming) continue;
+        const err = doStart(s, {
+          streamKey: p.streamKey, videoFile: p.videoFile,
+          format: p.format, volume: p.volume,
+          playlist: p.playlist, platform: p.platform,
+        });
+        if (err) console.error(`[autoRestore] Sessão ${p.id}: ${err}`);
+        else console.log(`[autoRestore] Sessão ${p.id} (${p.name}) restaurada com sucesso.`);
+      }
+    }, 3000);
+  } catch (e) {
+    console.error("[autoRestore] Erro ao ler state file:", e);
+  }
+}
+
+// Run on module load
+autoRestoreState();
 
 // ── Meta helpers ──────────────────────────────────────────────────────────────
 
@@ -378,6 +498,41 @@ function normalizeListUrl(raw: string): string {
 
 function ytDlpAvailable(): Promise<boolean> {
   return new Promise((resolve) => execFile("yt-dlp", ["--version"], { timeout: 5000 }, (err) => resolve(!err)));
+}
+
+// ── yt-dlp cookies & anti-bot args ───────────────────────────────────────────
+
+const COOKIES_DIR = path.join(process.cwd(), ".ytdlp");
+const COOKIES_FILE = path.join(COOKIES_DIR, "cookies.txt");
+
+/** Write YTDLP_COOKIES env-var content to disk once on first call. */
+function ensureCookiesFile(): void {
+  const content = process.env.YTDLP_COOKIES?.trim();
+  if (!content) return;
+  try {
+    if (!fs.existsSync(COOKIES_DIR)) fs.mkdirSync(COOKIES_DIR, { recursive: true });
+    // Only rewrite if content changed (avoid thrashing on every request)
+    const existing = fs.existsSync(COOKIES_FILE) ? fs.readFileSync(COOKIES_FILE, "utf8").trim() : "";
+    if (existing !== content) fs.writeFileSync(COOKIES_FILE, content + "\n", { mode: 0o600 });
+  } catch {
+    // Non-fatal — continue without cookies file
+  }
+}
+
+/**
+ * Returns extra yt-dlp args that bypass bot detection.
+ * - cookies.txt if YTDLP_COOKIES env var is set
+ * - android player_client (avoids sign-in gate on most public videos)
+ */
+function ytDlpAntiBot(): string[] {
+  ensureCookiesFile();
+  const args: string[] = [
+    "--extractor-args", "youtube:player_client=android",
+  ];
+  if (process.env.YTDLP_COOKIES?.trim() && fs.existsSync(COOKIES_FILE)) {
+    args.push("--cookies", COOKIES_FILE);
+  }
+  return args;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -612,6 +767,7 @@ router.post("/import/list", async (req, res) => {
     "--no-warnings",
     "--playlist-end", String(clampedLimit),
     ...(sort === "oldest" ? ["--playlist-reverse"] : []),
+    ...ytDlpAntiBot(),
     cleanUrl,
   ];
 
@@ -702,6 +858,7 @@ router.post("/import/download", async (req, res) => {
     "--no-playlist",
     "--newline",
     "--no-warnings",
+    ...ytDlpAntiBot(),
     videoUrl,
   ]);
 
