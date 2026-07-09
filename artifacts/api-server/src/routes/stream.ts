@@ -184,13 +184,24 @@ function publicSession(s: Session) {
 
 // ── RTMP URL builder ──────────────────────────────────────────────────────────
 
+/**
+ * Strip full RTMP URL if user accidentally pastes the entire stream URL.
+ * e.g. "rtmp://a.rtmp.youtube.com/live2/xxxx-yyyy" → "xxxx-yyyy"
+ */
+function sanitizeStreamKey(raw: string): string {
+  const s = raw.trim();
+  const m = s.match(/rtmps?:\/\/[^/]+\/[^/]+\/(.+)/);
+  return m ? m[1]!.trim() : s;
+}
+
 function buildRtmpUrl(platform: StreamPlatform, streamKey: string): string {
+  const key = sanitizeStreamKey(streamKey);
   switch (platform) {
-    case "tiktok":    return `rtmp://push.live-video.net/app/${streamKey}`;
-    case "twitch":    return `rtmp://live.twitch.tv/app/${streamKey}`;
-    case "instagram": return `rtmps://live-upload.instagram.com:443/rtmp/${streamKey}`;
+    case "tiktok":    return `rtmp://push.live-video.net/app/${key}`;
+    case "twitch":    return `rtmp://live.twitch.tv/app/${key}`;
+    case "instagram": return `rtmps://live-upload.instagram.com:443/rtmp/${key}`;
     case "youtube":
-    default:          return `rtmp://x.rtmp.youtube.com/live2/${streamKey}`;
+    default:          return `rtmp://a.rtmp.youtube.com/live2/${key}`;
   }
 }
 
