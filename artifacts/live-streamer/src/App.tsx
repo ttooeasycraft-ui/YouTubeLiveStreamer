@@ -120,6 +120,92 @@ function VolumeIcon({ level }: { level: number }) {
   );
 }
 
+// ── Import Results with Shorts filter ─────────────────────────────────────────
+
+type ImportVideo = { id: string; title: string; duration: number | null; thumbnail: string; url: string; isShort?: boolean };
+
+function ImportResults({ data, downloadJobs, onDownload, isPending, onDone }: {
+  data: { videos: ImportVideo[]; channelName: string | null };
+  downloadJobs: { jobId: string; title: string }[];
+  onDownload: (v: ImportVideo) => void;
+  isPending: boolean;
+  onDone: () => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "video" | "short">("all");
+  const hasShorts = data.videos.some((v) => v.isShort);
+  const hasVideos = data.videos.some((v) => !v.isShort);
+
+  const visible = data.videos.filter((v) => {
+    if (filter === "short") return v.isShort;
+    if (filter === "video") return !v.isShort;
+    return true;
+  });
+
+  return (
+    <div className="space-y-3">
+      {data.channelName && (
+        <p className="text-xs text-white/30 px-1">📺 {data.channelName} · {data.videos.length} item{data.videos.length !== 1 ? "s" : ""}</p>
+      )}
+
+      {/* Filter tabs — only show when there's a mix */}
+      {hasShorts && hasVideos && (
+        <div className="flex gap-2">
+          {([["all", "🎬 Todos"], ["video", "📺 Vídeos"], ["short", "📱 Shorts"]] as const).map(([v, label]) => (
+            <button key={v} onClick={() => setFilter(v)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${filter === v ? "accent-bg text-black" : "btn-ghost text-white/40"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {visible.length > 0 ? (
+        <div className="card p-5">
+          <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+            {visible.map((v) => {
+              const job = downloadJobs.find((j) => j.title === v.title);
+              return (
+                <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl border border-white/[0.05]">
+                  {/* Thumbnail — portrait for Shorts, landscape for videos */}
+                  {v.thumbnail && (
+                    v.isShort
+                      ? <img src={v.thumbnail} alt="" className="w-10 h-16 rounded-lg object-cover shrink-0 bg-white/5" loading="lazy" />
+                      : <img src={v.thumbnail} alt="" className="w-20 h-11 rounded-lg object-cover shrink-0 bg-white/5" loading="lazy" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      {v.isShort && <span className="text-[9px] font-bold bg-white/10 text-white/50 rounded px-1 py-0.5 shrink-0">📱 SHORT</span>}
+                      <p className="text-xs font-medium text-white/70 line-clamp-2 leading-snug">{v.title}</p>
+                    </div>
+                    {v.duration != null && <p className="text-[10px] text-white/25">{formatSeconds(v.duration)}</p>}
+                    {job && (
+                      <div className="mt-1.5">
+                        <ImportProgressPoller jobId={job.jobId} onDone={() => onDone()} />
+                      </div>
+                    )}
+                  </div>
+                  {!job && (
+                    <button onClick={() => onDownload(v)} disabled={isPending}
+                      className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-black accent-bg disabled:opacity-40 whitespace-nowrap">
+                      ⬇ Baixar
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="card p-8 text-center">
+          <p className="text-3xl mb-3">🔍</p>
+          <p className="text-sm text-white/30">Nenhum vídeo encontrado.</p>
+          <p className="text-xs text-white/20 mt-1">Tente a URL do canal principal ou de uma playlist pública.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImportProgressPoller({ jobId, onDone }: { jobId: string; onDone: (filename: string) => void }) {
   const { data } = useImportProgress(jobId, {
     query: {
@@ -1301,8 +1387,11 @@ function StreamerApp() {
               <div className="space-y-4">
                 {/* URL input */}
                 <input type="url" value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)}
-                  placeholder="https://www.youtube.com/@MeuCanal"
+                  placeholder="https://www.youtube.com/@MeuCanal  ou  /@Canal/shorts"
                   className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-white placeholder-white/15 focus:outline-none" />
+                <p className="text-[10px] text-white/20 -mt-2">
+                  💡 Para buscar só Shorts: cole a URL do canal e adicione <span className="font-mono text-white/30">/shorts</span> no final
+                </p>
 
                 {/* Limit slider */}
                 <div className="space-y-2">
@@ -1347,49 +1436,13 @@ function StreamerApp() {
 
             {/* Results */}
             {importListM.data && (
-              <>
-                {importListM.data.channelName && (
-                  <p className="text-xs text-white/30 px-1">📺 {importListM.data.channelName} · {importListM.data.videos.length} vídeo{importListM.data.videos.length !== 1 ? "s" : ""}</p>
-                )}
-                {importListM.data.videos.length > 0 ? (
-                  <div className="card p-5">
-                    <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-                      {importListM.data.videos.map((v) => {
-                        const job = downloadJobs.find((j) => j.title === v.title);
-                        return (
-                          <div key={v.id} className="flex items-center gap-3 p-3 rounded-xl border border-white/[0.05]">
-                            {v.thumbnail && (
-                              <img src={v.thumbnail} alt="" className="w-20 h-11 rounded-lg object-cover shrink-0 bg-white/5" loading="lazy" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-white/70 line-clamp-2 leading-snug">{v.title}</p>
-                              {v.duration && <p className="text-[10px] text-white/25 mt-0.5">{formatSeconds(v.duration)}</p>}
-                              {job && (
-                                <div className="mt-1.5">
-                                  <ImportProgressPoller jobId={job.jobId} onDone={() => invVideos()} />
-                                </div>
-                              )}
-                            </div>
-                            {!job && (
-                              <button onClick={() => importDownloadM.mutate({ data: { url: v.url, title: v.title } })}
-                                disabled={importDownloadM.isPending}
-                                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold text-black accent-bg disabled:opacity-40 whitespace-nowrap">
-                                ⬇ Baixar
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="card p-8 text-center">
-                    <p className="text-3xl mb-3">🔍</p>
-                    <p className="text-sm text-white/30">Nenhum vídeo encontrado.</p>
-                    <p className="text-xs text-white/20 mt-1">Tente a URL do canal principal ou de uma playlist pública.</p>
-                  </div>
-                )}
-              </>
+              <ImportResults
+                data={importListM.data as { videos: Array<{ id: string; title: string; duration: number | null; thumbnail: string; url: string; isShort?: boolean }>; channelName: string | null }}
+                downloadJobs={downloadJobs}
+                onDownload={(v) => importDownloadM.mutate({ data: { url: v.url, title: v.title } })}
+                isPending={importDownloadM.isPending}
+                onDone={() => invVideos()}
+              />
             )}
 
             {/* Active downloads */}
