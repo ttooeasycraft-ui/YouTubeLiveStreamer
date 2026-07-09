@@ -547,11 +547,20 @@ function ytDlpAntiBot(): string[] {
 
 // ── Videos ──────────────────────────────────────────────────────────────────
 
+const VIDEO_EXTS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"]);
+
 router.get("/videos", (_req, res) => {
   if (!fs.existsSync(UPLOADS_DIR)) { res.json([]); return; }
   const meta = readMeta();
   const files = fs.readdirSync(UPLOADS_DIR)
-    .filter((f) => f !== "meta.json")
+    .filter((f) => {
+      if (f === "meta.json") return false;
+      const full = path.join(UPLOADS_DIR, f);
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) return false; // skip thumbnails/ and any other subdirs
+      if (!VIDEO_EXTS.has(path.extname(f).toLowerCase())) return false;
+      return true;
+    })
     .map((filename) => {
       const stat = fs.statSync(path.join(UPLOADS_DIR, filename));
       const info = meta[filename];
