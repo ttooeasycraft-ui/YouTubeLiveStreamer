@@ -485,8 +485,8 @@ function StreamerApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [backendUrl, setBackendUrlState] = useState(getSavedBackendUrl);
   const [backendUrlDraft, setBackendUrlDraft] = useState(getSavedBackendUrl);
-  const [streamKey, setStreamKey] = useState("");
-  const [selectedVideo, setSelectedVideo] = useState("");
+  const [streamKey, setStreamKey] = useState(() => localStorage.getItem("streamKey") || "");
+  const [selectedVideo, setSelectedVideo] = useState(() => localStorage.getItem("selectedVideo") || "");
   const [showKey, setShowKey] = useState(false);
   const [format, setFormat] = useState<"landscape" | "shorts">("landscape");
   const [volume, setVolume] = useState(100);
@@ -614,6 +614,9 @@ function StreamerApp() {
     }
     if (isStreaming) { if (restartTimerRef.current) clearTimeout(restartTimerRef.current); if (restartCdRef.current) clearInterval(restartCdRef.current); setRestartCountdown(null); }
   }, [isStreaming]); // eslint-disable-line
+
+  useEffect(() => { localStorage.setItem("streamKey", streamKey); }, [streamKey]);
+  useEffect(() => { if (selectedVideo) localStorage.setItem("selectedVideo", selectedVideo); }, [selectedVideo]);
 
   useEffect(() => {
     if (!scheduleActive || !scheduleTime) return;
@@ -913,33 +916,6 @@ function StreamerApp() {
                   <p className="text-[11px] text-white/20 mt-2">🔀 Duas lives simultâneas: 16:9 e Shorts (9:16)</p>
                 ) : (
                   <p className="text-[11px] text-white/20 mt-2">YouTube Studio → Ir ao Vivo → Chave de stream</p>
-                )}
-              </div>
-
-              {/* Thumbnail */}
-              <div className="card p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="step-num w-6 h-6 rounded-full text-xs flex items-center justify-center">🖼</span>
-                    <h2 className="font-bold text-sm">Thumbnail</h2>
-                  </div>
-                  <label className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${thumbUploading ? "opacity-40 cursor-wait" : "btn-ghost hover:opacity-80"}`}>
-                    {thumbUploading ? "Enviando…" : thumbFilename ? "Trocar" : "+ Upload"}
-                    <input ref={thumbInputRef} type="file" accept="image/*" className="hidden" disabled={thumbUploading}
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleThumbUpload(f); e.target.value = ""; } }} />
-                  </label>
-                </div>
-                {thumbFilename ? (
-                  <div className="relative group">
-                    <img src={getThumbUrl(thumbFilename)} alt="Thumbnail"
-                      className="w-full rounded-xl object-cover max-h-32 bg-white/[0.04]" />
-                    <button onClick={() => setThumbFilename(null)}
-                      className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 text-white/60 hover:text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-white/20">Opcional — aparece nas miniaturas do YouTube</p>
                 )}
               </div>
 
