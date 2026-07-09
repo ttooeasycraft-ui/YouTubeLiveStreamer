@@ -486,7 +486,8 @@ function cleanYtUrl(raw: string): string {
 }
 
 // For LISTING: bare @handle channel URL → /videos tab so yt-dlp returns individual videos
-// instead of the channel's tab-playlists (Vídeos/Live/Shorts sections)
+// instead of the channel's tab-playlists (Vídeos/Live/Shorts sections).
+// If the caller already passed /@handle/shorts, keep it as-is so we list Shorts.
 function normalizeListUrl(raw: string): string {
   const clean = cleanYtUrl(raw);
   const isBarechannel = /^https?:\/\/(?:www\.)?youtube\.com\/@[^/?#]+\/?$/.test(clean);
@@ -494,6 +495,13 @@ function normalizeListUrl(raw: string): string {
     return clean.replace(/\/?$/, "") + "/videos";
   }
   return clean;
+}
+
+/** True when a yt-dlp flat-playlist entry is a YouTube Short (≤60s or /shorts/ in url) */
+function isShortEntry(e: Record<string, unknown>): boolean {
+  const dur = typeof e.duration === "number" ? e.duration : null;
+  const url = String(e.url ?? e.webpage_url ?? "");
+  return url.includes("/shorts/") || (dur !== null && dur <= 61);
 }
 
 function ytDlpAvailable(): Promise<boolean> {
@@ -792,27 +800,35 @@ router.post("/import/list", async (req, res) => {
           // _type === "playlist" or ie_key === "YoutubeTab" means it's a tab, not a video
           if (e._type === "playlist") return false;
           if (typeof e.ie_key === "string" && e.ie_key === "YoutubeTab") return false;
-          // If the url is a playlist url (/playlist?list=) without a watch?v=, skip it
+          // If the url is a playlist url (/playlist?list=) without a watch?v= or /shorts/, skip it
           const eUrl = String(e.url ?? e.webpage_url ?? "");
-          if (eUrl.includes("/playlist?list=") || (eUrl.includes("/@") && !eUrl.includes("/watch?v="))) return false;
+          if (eUrl.includes("/playlist?list=") || (eUrl.includes("/@") && !eUrl.includes("/watch?v=") && !eUrl.includes("/shorts/"))) return false;
           return true;
         })
         .map((e: Record<string, unknown>) => {
           const thumbnails = Array.isArray(e.thumbnails) ? e.thumbnails : [];
           const thumb = thumbnails.length > 0 ? (thumbnails[thumbnails.length - 1] as { url?: string })?.url : null;
-          // Build the best video URL - prefer watch?v= links
           const videoId = String(e.id);
-          const videoUrl = typeof e.webpage_url === "string" && e.webpage_url.includes("watch?v=")
-            ? e.webpage_url
-            : typeof e.url === "string" && e.url.includes("watch?v=")
-            ? e.url
-            : `https://www.youtube.com/watch?v=${videoId}`;
+          const short = isShortEntry(e);
+          // Build best video URL — Shorts get /shorts/ canonical link; videos get watch?v=
+          const videoUrl = short
+            ? (typeof e.webpage_url === "string" && e.webpage_url.includes("/shorts/")
+              ? e.webpage_url
+              : typeof e.url === "string" && e.url.includes("/shorts/")
+              ? e.url
+              : `https://www.youtube.com/shorts/${videoId}`)
+            : (typeof e.webpage_url === "string" && e.webpage_url.includes("watch?v=")
+              ? e.webpage_url
+              : typeof e.url === "string" && e.url.includes("watch?v=")
+              ? e.url
+              : `https://www.youtube.com/watch?v=${videoId}`);
           return {
             id: videoId,
             title: typeof e.title === "string" ? e.title : "(sem título)",
             duration: typeof e.duration === "number" ? e.duration : null,
             thumbnail: thumb ?? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
             url: videoUrl,
+            isShort: short,
           };
         });
 
@@ -843,8 +859,9 @@ router.post("/import/download", async (req, res) => {
 
   const videoUrl = cleanYtUrl(url);
 
-  // Warn if this looks like a playlist/tab URL instead of a video
-  if (!videoUrl.includes("/watch?v=") && !videoUrl.includes("youtu.be/")) {
+  // Allow watch?v=, youtu.be/, and /shorts/ — block channel/playlist URLs
+  const isVideoUrl = videoUrl.includes("/watch?v=") || videoUrl.includes("youtu.be/") || videoUrl.includes("/shorts/");
+  if (!isVideoUrl) {
     if (videoUrl.includes("/playlist?list=") || videoUrl.includes("/@") || videoUrl.includes("/channel/")) {
       res.status(400).json({ error: "Esta URL é de um canal/playlist, não de um vídeo. Use a aba Importar para buscar e selecionar vídeos individuais." });
       return;
