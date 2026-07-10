@@ -91,6 +91,7 @@ interface PersistedSession {
   volume: number;
   playlist: string[];
   platform: StreamPlatform;
+  wasStable: boolean;
 }
 
 function saveState() {
@@ -103,6 +104,7 @@ function saveState() {
           streamKey: s.streamKey, videoFile: s.videoFile,
           format: s.format, volume: s.volume,
           playlist: s.playlist, platform: s.platform,
+          wasStable: s.stableAt !== null,
         });
       }
     }
@@ -454,8 +456,18 @@ function autoRestoreState() {
           format: p.format, volume: p.volume,
           playlist: p.playlist, platform: p.platform,
         });
-        if (err) console.error(`[autoRestore] Sessão ${p.id}: ${err}`);
-        else console.log(`[autoRestore] Sessão ${p.id} (${p.name}) restaurada com sucesso.`);
+        if (err) {
+          console.error(`[autoRestore] Sessão ${p.id}: ${err}`);
+        } else {
+          if (p.wasStable) {
+            // Session was already stable before restart (e.g. server redeploy) —
+            // it's a reconnect, not a fresh stream, so skip the 20s wait.
+            clearStableTimer(s);
+            s.stableAt = new Date().toISOString();
+            saveState();
+          }
+          console.log(`[autoRestore] Sessão ${p.id} (${p.name}) restaurada com sucesso.`);
+        }
       }
     }, 3000);
   } catch (e) {
