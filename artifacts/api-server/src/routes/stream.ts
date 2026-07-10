@@ -527,6 +527,12 @@ function isShortEntry(e: Record<string, unknown>): boolean {
   return url.includes("/shorts/") || (dur !== null && dur <= 61);
 }
 
+/** True when a yt-dlp flat-playlist entry is an ongoing or past live stream. */
+function isLiveEntry(e: Record<string, unknown>): boolean {
+  const status = typeof e.live_status === "string" ? e.live_status : "";
+  return status === "is_live" || status === "was_live" || e.is_live === true || e.was_live === true;
+}
+
 function ytDlpAvailable(): Promise<boolean> {
   return new Promise((resolve) => execFile("yt-dlp", ["--version"], { timeout: 5000 }, (err) => resolve(!err)));
 }
@@ -798,14 +804,17 @@ router.post("/import/list", async (req, res) => {
   }
 
   // Use normalizeListUrl so bare @channel → @channel/videos (avoids returning tabs instead of videos)
-  const cleanUrl = normalizeListUrl(url);
+  // "popular" sort needs a bigger pool to pick the top N most-viewed from, since YouTube itself
+  // doesn't sort a channel's /videos tab by views.
   const clampedLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+  const fetchLimit = sort === "popular" ? Math.min(75, clampedLimit * 3) : clampedLimit;
+  const cleanUrl = normalizeListUrl(url);
 
   const args = [
     "--flat-playlist",
     "--dump-single-json",
     "--no-warnings",
-    "--playlist-end", String(clampedLimit),
+    "--playlist-end", String(fetchLimit),
     ...(sort === "oldest" ? ["--playlist-reverse"] : []),
     ...ytDlpAntiBot(),
     cleanUrl,
@@ -861,10 +870,17 @@ router.post("/import/list", async (req, res) => {
             thumbnail: thumb ?? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
             url: videoUrl,
             isShort: short,
+            isLive: isLiveEntry(e),
+            views: typeof e.view_count === "number" ? e.view_count : null,
           };
         });
 
-      res.json({ videos, channelName });
+      if (sort === "popular") {
+        videos.sort((a: { views: number | null }, b: { views: number | null }) => (b.views ?? -1) - (a.views ?? -1));
+      }
+      const limited = videos.slice(0, clampedLimit);
+
+      res.json({ videos: limited, channelName });
     } catch (parseErr) {
       res.status(400).json({ error: "Não foi possível interpretar a resposta do yt-dlp. Tente outra URL." });
     }
@@ -876,7 +892,7 @@ router.post("/import/download", async (req, res) => {
     res.status(503).json({ error: "yt-dlp não está disponível neste servidor." }); return;
   }
 
-  const { url, title } = req.body as { url?: string; title?: string };
+  const { url, title, isLive } = req.body as { url?: string; title?: string; isLive?: boolean };
   if (!url) { res.status(400).json({ error: "url é obrigatório." }); return; }
   if (!url.includes("youtube.com") && !url.includes("youtu.be")) {
     res.status(400).json({ error: "Use uma URL do YouTube." }); return;
@@ -901,12 +917,16 @@ router.post("/import/download", async (req, res) => {
   }
 
   const proc = spawn("yt-dlp", [
+    // "best" fallback at the end covers Shorts/lives that only expose a single pre-merged format.
     "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
     "--merge-output-format", "mp4",
     "--output", outputTemplate,
     "--no-playlist",
     "--newline",
     "--no-warnings",
+    // For an ongoing/past live, capture the full broadcast from the beginning instead of
+    // just joining from "now" (yt-dlp's default for live URLs).
+    ...(isLive ? ["--live-from-start"] : []),
     ...ytDlpAntiBot(),
     videoUrl,
   ]);
