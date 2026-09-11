@@ -107,6 +107,13 @@ type GoogleUser = {
   emailVerified: boolean;
   name: string;
   picture: string | null;
+  youtube?: YouTubeProfile;
+};
+
+type YouTubeProfile = {
+  name: string;
+  handle: string | null;
+  picture: string | null;
 };
 
 declare const __GOOGLE_CLIENT_ID__: string;
@@ -129,6 +136,15 @@ type GoogleIdentity = {
           width?: number;
         },
       ) => void;
+    };
+    oauth2?: {
+      initTokenClient: (options: {
+        client_id: string;
+        scope: string;
+        callback: (response: { access_token?: string; error?: string }) => void;
+      }) => {
+        requestAccessToken: (options?: { prompt?: string }) => void;
+      };
     };
   };
 };
@@ -184,6 +200,79 @@ function GoogleAccount({ backendUrl }: { backendUrl: string }) {
   const [clientId, setClientId] = useState<string | null>(() => __GOOGLE_CLIENT_ID__ || null);
   const [user, setUser] = useState<GoogleUser | null>(readSavedGoogleUser);
   const [error, setError] = useState("");
+  const [youtubeLoading, setYoutubeLoading] = useState(false);
+  const [youtubeError, setYoutubeError] = useState("");
+
+  function connectYouTube() {
+    if (!clientId || !window.google?.accounts.oauth2) {
+      setYoutubeError("O login do Google ainda não está pronto.");
+      return;
+    }
+
+    setYoutubeLoading(true);
+    setYoutubeError("");
+    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/youtube.readonly",
+      callback: async ({ access_token, error: tokenError }) => {
+        try {
+          if (!access_token) {
+            throw new Error(tokenError === "access_denied"
+              ? "Permissão do YouTube não concedida."
+              : "Não foi possível autorizar o YouTube.");
+          }
+
+          const response = await fetch(
+            "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
+            { headers: { Authorization: `Bearer ${access_token}` } },
+          );
+          if (!response.ok) throw new Error("A API do YouTube não respondeu.");
+
+          const data = await response.json() as {
+            items?: Array<{
+              snippet?: {
+                title?: string;
+                customUrl?: string;
+                thumbnails?: {
+                  high?: { url?: string };
+                  medium?: { url?: string };
+                  default?: { url?: string };
+                };
+              };
+            }>;
+          };
+          const snippet = data.items?.[0]?.snippet;
+          if (!snippet?.title) throw new Error("Nenhum canal do YouTube foi encontrado.");
+
+          const customUrl = snippet.customUrl?.trim();
+          const youtube: YouTubeProfile = {
+            name: snippet.title,
+            handle: customUrl ? (customUrl.startsWith("@") ? customUrl : `@${customUrl}`) : null,
+            picture: snippet.thumbnails?.high?.url
+              ?? snippet.thumbnails?.medium?.url
+              ?? snippet.thumbnails?.default?.url
+              ?? null,
+          };
+
+          setUser((current) => {
+            if (!current) return current;
+            const next = { ...current, youtube };
+            localStorage.setItem("googleUser", JSON.stringify(next));
+            return next;
+          });
+        } catch (youtubeLoginError) {
+          setYoutubeError(
+            youtubeLoginError instanceof Error
+              ? youtubeLoginError.message
+              : "Não foi possível carregar o canal do YouTube.",
+          );
+        } finally {
+          setYoutubeLoading(false);
+        }
+      },
+    });
+    tokenClient.requestAccessToken({ prompt: "consent" });
+  }
 
   useEffect(() => {
     if (clientId || !backendUrl) return;
@@ -238,6 +327,7 @@ function GoogleAccount({ backendUrl }: { backendUrl: string }) {
             if (!data) throw new Error("Não foi possível ler o perfil retornado pelo Google.");
             localStorage.setItem("googleUser", JSON.stringify(data));
             setUser(data);
+            connectYouTube();
           } catch (loginError) {
             setError(loginError instanceof Error ? loginError.message : "Falha no login Google.");
           }
@@ -271,21 +361,35 @@ function GoogleAccount({ backendUrl }: { backendUrl: string }) {
     localStorage.removeItem("googleUser");
     setUser(null);
     setError("");
+    setYoutubeError("");
   }
 
   if (user) {
+    const displayName = user.youtube?.name ?? user.name;
+    const displayPicture = user.youtube?.picture ?? user.picture;
     return (
       <div className="flex items-center gap-2 pl-2">
-        <div className="text-right hidden sm:block">
-          <p className="text-xs font-semibold text-white/80 max-w-28 truncate">{user.name}</p>
-          <p className="text-[10px] text-white/30 max-w-28 truncate">{user.email}</p>
+        <div className="text-right block">
+          <p className="text-xs font-semibold text-white/80 max-w-24 sm:max-w-36 truncate">{displayName}</p>
+          {user.youtube?.handle ? (
+            <p className="text-[10px] text-red-400/80 max-w-24 sm:max-w-36 truncate">{user.youtube.handle}</p>
+          ) : (
+            <button
+              onClick={connectYouTube}
+              disabled={youtubeLoading}
+              className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
+            >
+              {youtubeLoading ? "Conectando YouTube..." : "Conectar YouTube"}
+            </button>
+          )}
+          {youtubeError && <p className="text-[9px] text-amber-400 max-w-24 sm:max-w-40 truncate" title={youtubeError}>{youtubeError}</p>}
         </div>
         <button onClick={logout} title="Sair da conta Google" className="relative group">
-          {user.picture ? (
-            <img src={user.picture} alt={user.name} className="w-9 h-9 rounded-full object-cover ring-2 ring-white/10 group-hover:ring-white/30 transition-all" />
+          {displayPicture ? (
+            <img src={displayPicture} alt={displayName} className="w-9 h-9 rounded-full object-cover ring-2 ring-white/10 group-hover:ring-white/30 transition-all" />
           ) : (
             <span className="w-9 h-9 rounded-full accent-bg text-black font-bold text-sm flex items-center justify-center">
-              {user.name.slice(0, 1).toUpperCase()}
+              {displayName.slice(0, 1).toUpperCase()}
             </span>
           )}
           <span className="absolute -bottom-1 -right-1 text-[9px] bg-black rounded-full px-1 opacity-0 group-hover:opacity-100 transition-opacity">×</span>
