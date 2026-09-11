@@ -101,6 +101,170 @@ const PLATFORM_LABELS: Record<StreamPlatform, string> = {
   instagram: "📷 Instagram",
 };
 
+type GoogleUser = {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  name: string;
+  picture: string | null;
+};
+
+type GoogleIdentity = {
+  accounts: {
+    id: {
+      initialize: (options: {
+        client_id: string;
+        callback: (response: { credential: string }) => void;
+      }) => void;
+      renderButton: (
+        element: HTMLElement,
+        options: {
+          theme?: string;
+          size?: string;
+          shape?: string;
+          text?: string;
+          logo_alignment?: string;
+          width?: number;
+        },
+      ) => void;
+    };
+  };
+};
+
+declare global {
+  interface Window {
+    google?: GoogleIdentity;
+  }
+}
+
+function getApiRoot(backendUrl: string): string {
+  // No Replit, o API server é roteado em /api. Em hospedagem externa,
+  // backendUrl aponta para a URL pública do servidor.
+  return backendUrl;
+}
+
+function readSavedGoogleUser(): GoogleUser | null {
+  try {
+    const raw = localStorage.getItem("googleUser");
+    return raw ? JSON.parse(raw) as GoogleUser : null;
+  } catch {
+    return null;
+  }
+}
+
+function GoogleAccount({ backendUrl }: { backendUrl: string }) {
+  const buttonRef = useRef<HTMLDivElement>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [user, setUser] = useState<GoogleUser | null>(readSavedGoogleUser);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const apiRoot = getApiRoot(backendUrl);
+    let cancelled = false;
+
+    fetch(`${apiRoot}/api/auth/google/config`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Backend indisponível");
+        return response.json() as Promise<{ enabled?: boolean; clientId?: string | null }>;
+      })
+      .then((data) => {
+        if (!cancelled) setClientId(data.enabled ? data.clientId ?? null : null);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Configure o backend para ativar o login Google.");
+      });
+
+    return () => { cancelled = true; };
+  }, [backendUrl]);
+
+  useEffect(() => {
+    if (!clientId || user || !buttonRef.current) return;
+
+    const renderGoogleButton = () => {
+      if (!window.google || !buttonRef.current) return;
+      buttonRef.current.replaceChildren();
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }) => {
+          try {
+            setError("");
+            const response = await fetch(`${getApiRoot(backendUrl)}/api/auth/google`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ credential }),
+            });
+            const data = await response.json() as GoogleUser & { error?: string };
+            if (!response.ok) throw new Error(data.error ?? "Falha no login");
+            localStorage.setItem("googleUser", JSON.stringify(data));
+            setUser(data);
+          } catch (loginError) {
+            setError(loginError instanceof Error ? loginError.message : "Falha no login Google.");
+          }
+        },
+      });
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        theme: "filled_black",
+        size: "medium",
+        shape: "pill",
+        text: "signin_with",
+        logo_alignment: "left",
+        width: 210,
+      });
+    };
+
+    if (window.google) {
+      renderGoogleButton();
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      if (window.google) {
+        window.clearInterval(interval);
+        renderGoogleButton();
+      }
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, [backendUrl, clientId, user]);
+
+  function logout() {
+    localStorage.removeItem("googleUser");
+    setUser(null);
+    setError("");
+  }
+
+  if (user) {
+    return (
+      <div className="flex items-center gap-2 pl-2">
+        <div className="text-right hidden sm:block">
+          <p className="text-xs font-semibold text-white/80 max-w-28 truncate">{user.name}</p>
+          <p className="text-[10px] text-white/30 max-w-28 truncate">{user.email}</p>
+        </div>
+        <button onClick={logout} title="Sair da conta Google" className="relative group">
+          {user.picture ? (
+            <img src={user.picture} alt={user.name} className="w-9 h-9 rounded-full object-cover ring-2 ring-white/10 group-hover:ring-white/30 transition-all" />
+          ) : (
+            <span className="w-9 h-9 rounded-full accent-bg text-black font-bold text-sm flex items-center justify-center">
+              {user.name.slice(0, 1).toUpperCase()}
+            </span>
+          )}
+          <span className="absolute -bottom-1 -right-1 text-[9px] bg-black rounded-full px-1 opacity-0 group-hover:opacity-100 transition-opacity">×</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      {clientId ? <div ref={buttonRef} className="min-w-[210px] min-h-10" /> : (
+        <button disabled title={error || "Configure o backend"} className="px-3 py-2 rounded-xl btn-ghost text-xs text-white/30">
+          Entrar com Google
+        </button>
+      )}
+      {error && <span className="text-[9px] text-amber-400 max-w-52 text-right">{error}</span>}
+    </div>
+  );
+}
+
 function VolumeIcon({ level }: { level: number }) {
   if (level === 0) return (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -781,6 +945,7 @@ function StreamerApp() {
           )}
 
           <div className="ml-auto flex items-center gap-2">
+            <GoogleAccount backendUrl={backendUrl} />
             <button onClick={() => { setShowSettings(!showSettings); setBackendUrlDraft(backendUrl); }}
               className="w-9 h-9 rounded-xl btn-ghost flex items-center justify-center transition-colors">
               <svg className="w-4 h-4 text-white/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
