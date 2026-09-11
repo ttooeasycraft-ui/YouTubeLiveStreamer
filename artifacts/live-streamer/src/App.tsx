@@ -109,6 +109,8 @@ type GoogleUser = {
   picture: string | null;
 };
 
+declare const __GOOGLE_CLIENT_ID__: string;
+
 type GoogleIdentity = {
   accounts: {
     id: {
@@ -152,13 +154,39 @@ function readSavedGoogleUser(): GoogleUser | null {
   }
 }
 
+function decodeGoogleCredential(credential: string): GoogleUser | null {
+  try {
+    const encodedPayload = credential.split(".")[1];
+    if (!encodedPayload) return null;
+    const normalized = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="))) as {
+      sub?: string;
+      email?: string;
+      email_verified?: boolean | string;
+      name?: string;
+      picture?: string;
+    };
+    if (!payload.sub || !payload.email) return null;
+    return {
+      id: payload.sub,
+      email: payload.email,
+      emailVerified: payload.email_verified === true || payload.email_verified === "true",
+      name: payload.name ?? payload.email.split("@")[0],
+      picture: payload.picture ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function GoogleAccount({ backendUrl }: { backendUrl: string }) {
   const buttonRef = useRef<HTMLDivElement>(null);
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(() => __GOOGLE_CLIENT_ID__ || null);
   const [user, setUser] = useState<GoogleUser | null>(readSavedGoogleUser);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (clientId || !backendUrl) return;
     const apiRoot = getApiRoot(backendUrl);
     let cancelled = false;
 
@@ -171,11 +199,13 @@ function GoogleAccount({ backendUrl }: { backendUrl: string }) {
         if (!cancelled) setClientId(data.enabled ? data.clientId ?? null : null);
       })
       .catch(() => {
-        if (!cancelled) setError("Configure o backend para ativar o login Google.");
+        if (!cancelled && !__GOOGLE_CLIENT_ID__) {
+          setError("Configure o backend para ativar o login Google.");
+        }
       });
 
     return () => { cancelled = true; };
-  }, [backendUrl]);
+  }, [backendUrl, clientId]);
 
   useEffect(() => {
     if (!clientId || user || !buttonRef.current) return;
@@ -188,13 +218,24 @@ function GoogleAccount({ backendUrl }: { backendUrl: string }) {
         callback: async ({ credential }) => {
           try {
             setError("");
-            const response = await fetch(`${getApiRoot(backendUrl)}/api/auth/google`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ credential }),
-            });
-            const data = await response.json() as GoogleUser & { error?: string };
-            if (!response.ok) throw new Error(data.error ?? "Falha no login");
+            let data: GoogleUser | null = null;
+
+            if (backendUrl) {
+              try {
+                const response = await fetch(`${getApiRoot(backendUrl)}/api/auth/google`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ credential }),
+                });
+                if (response.ok) data = await response.json() as GoogleUser;
+              } catch {
+                // O perfil pode ser exibido sem backend; o servidor continua
+                // sendo usado sempre que uma URL pública estiver configurada.
+              }
+            }
+
+            data ??= decodeGoogleCredential(credential);
+            if (!data) throw new Error("Não foi possível ler o perfil retornado pelo Google.");
             localStorage.setItem("googleUser", JSON.stringify(data));
             setUser(data);
           } catch (loginError) {

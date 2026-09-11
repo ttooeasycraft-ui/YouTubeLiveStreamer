@@ -28,6 +28,13 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
+  define: {
+    // Client IDs do Google são públicos e podem ser enviados ao navegador.
+    // O CLIENT_SECRET nunca é incluído no build.
+    __GOOGLE_CLIENT_ID__: JSON.stringify(
+      process.env.ID_DO_CLIENTE ?? process.env.VITE_GOOGLE_CLIENT_ID ?? "",
+    ),
+  },
   plugins: [
     react(),
     tailwindcss(),
