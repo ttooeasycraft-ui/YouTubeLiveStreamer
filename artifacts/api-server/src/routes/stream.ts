@@ -508,6 +508,18 @@ function cleanYtUrl(raw: string): string {
   }
 }
 
+/**
+ * Shorts are valid YouTube URLs, but the watch URL is more consistently
+ * supported by yt-dlp across player clients and deployed yt-dlp versions.
+ * Keep accepting /shorts/ URLs from the UI, then use the canonical watch URL
+ * only for the download process.
+ */
+function canonicalDownloadUrl(raw: string): string {
+  const clean = cleanYtUrl(raw);
+  const match = clean.match(/^https?:\/\/(?:www\.)?youtube\.com\/shorts\/([^/?#]+)/i);
+  return match ? `https://www.youtube.com/watch?v=${match[1]}` : clean;
+}
+
 // For LISTING: bare @handle channel URL → /videos tab so yt-dlp returns individual videos
 // instead of the channel's tab-playlists (Vídeos/Live/Shorts sections).
 // If the caller already passed /@handle/shorts, keep it as-is so we list Shorts.
@@ -905,7 +917,7 @@ router.post("/import/download", async (req, res) => {
   const job: DownloadJob = { jobId, status: "downloading", percent: 0, filename: null, error: null, title: title ?? "Vídeo" };
   downloadJobs.set(jobId, job);
 
-  const videoUrl = cleanYtUrl(url);
+  const videoUrl = canonicalDownloadUrl(url);
 
   // Allow watch?v=, youtu.be/, and /shorts/ — block channel/playlist URLs
   const isVideoUrl = videoUrl.includes("/watch?v=") || videoUrl.includes("youtu.be/") || videoUrl.includes("/shorts/");
@@ -917,8 +929,10 @@ router.post("/import/download", async (req, res) => {
   }
 
   const proc = spawn("yt-dlp", [
-    // "best" fallback at the end covers Shorts/lives that only expose a single pre-merged format.
-    "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+    // Shorts often expose only a progressive stream or a non-m4a audio stream.
+    // Keep the preferred MP4 pair, then accept any compatible video/audio pair,
+    // and finally a single progressive stream.
+    "--format", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
     "--merge-output-format", "mp4",
     "--output", outputTemplate,
     "--no-playlist",
