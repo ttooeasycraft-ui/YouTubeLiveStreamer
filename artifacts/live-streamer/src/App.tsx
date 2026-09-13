@@ -326,10 +326,19 @@ function GoogleAccount({ backendUrl }: { backendUrl: string }) {
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ credential }),
                 });
-                if (response.ok) data = await response.json() as GoogleUser;
-              } catch {
-                // O perfil pode ser exibido sem backend; o servidor continua
-                // sendo usado sempre que uma URL pública estiver configurada.
+                const responseData = await response.json().catch(() => null) as { error?: string } | GoogleUser | null;
+                if (!response.ok) {
+                  throw new Error(
+                    responseData && "error" in responseData && responseData.error
+                      ? responseData.error
+                      : "Não foi possível salvar sua conta, tente novamente.",
+                  );
+                }
+                data = responseData as GoogleUser;
+              } catch (backendError) {
+                throw backendError instanceof Error
+                  ? backendError
+                  : new Error("Não foi possível salvar sua conta, tente novamente.");
               }
             }
 

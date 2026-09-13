@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { logApiError } from "../lib/error-log";
 
 const router = Router();
 
@@ -28,10 +29,19 @@ router.post("/google", async (req, res) => {
   }
 
   try {
-    const googleResponse = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
-    );
+    let googleResponse: Response;
+    try {
+      googleResponse = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+      );
+    } catch (error) {
+      logApiError("validar_token_google", error);
+      res.status(502).json({ error: "O serviço do Google não respondeu." });
+      return;
+    }
+
     if (!googleResponse.ok) {
+      logApiError("validar_token_google", new Error(`Google tokeninfo HTTP ${googleResponse.status}`));
       res.status(401).json({ error: "Não foi possível validar o login do Google." });
       return;
     }
@@ -52,6 +62,31 @@ router.post("/google", async (req, res) => {
       return;
     }
 
+    try {
+      if (!process.env.DATABASE_URL) {
+        throw new Error("DATABASE_URL não configurado para salvar o perfil.");
+      }
+
+      const { db, usuariosTable } = await import("@workspace/db");
+      const now = new Date();
+      await db.insert(usuariosTable).values({
+        googleSub: profile.sub,
+        name: profile.name ?? profile.email.split("@")[0],
+        email: profile.email,
+        picture: profile.picture ?? null,
+        firstLoginAt: now,
+        lastLoginAt: now,
+      }).onConflictDoUpdate({
+        target: usuariosTable.googleSub,
+        // Existing profile fields are intentionally preserved on later logins.
+        set: { lastLoginAt: now },
+      });
+    } catch (error) {
+      logApiError("salvar_perfil_usuario", error);
+      res.status(503).json({ error: "Não foi possível salvar sua conta, tente novamente." });
+      return;
+    }
+
     res.json({
       id: profile.sub,
       email: profile.email,
@@ -62,7 +97,7 @@ router.post("/google", async (req, res) => {
       familyName: profile.family_name ?? null,
     });
   } catch (error) {
-    console.error("[Auth] Erro ao validar login do Google:", error);
+    logApiError("login_google", error);
     res.status(502).json({ error: "O serviço do Google não respondeu." });
   }
 });
