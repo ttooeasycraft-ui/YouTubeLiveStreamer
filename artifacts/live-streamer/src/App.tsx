@@ -34,8 +34,18 @@ import {
 const queryClient = new QueryClient();
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const IS_GITHUB_PAGES = window.location.hostname.includes("github.io");
+const DEFAULT_BACKEND_URL = "https://youtubelivestreamer-production-48c8.up.railway.app";
 
-function getSavedBackendUrl() { return localStorage.getItem("backendUrl") || ""; }
+function getSavedBackendUrl() {
+  const saved = localStorage.getItem("backendUrl") || "";
+  // Migrate the retired Railway address so published users do not need to
+  // open Settings and repair the backend URL manually.
+  if (saved === "https://youtubelivestreamer-production.up.railway.app") {
+    localStorage.setItem("backendUrl", DEFAULT_BACKEND_URL);
+    return DEFAULT_BACKEND_URL;
+  }
+  return saved || (IS_GITHUB_PAGES ? DEFAULT_BACKEND_URL : "");
+}
 function normalizeBackendUrl(raw: string) {
   const t = raw.trim().replace(/\/+$/, "");
   if (!t) return "";
